@@ -162,7 +162,7 @@ class ConstituentGenerator:
         if constituent_type not in ['Alum', 'Trustee', 'Regent']:
             return None
         # Normal distribution centered around 1995, std dev 20
-        year = int(np.random.normal(1995, 20))
+        year = int(rng.normal(1995, 20))
         return max(1950, min(current_year, year))
     
     def assign_manager(self):
