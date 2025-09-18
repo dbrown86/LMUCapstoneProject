@@ -1,9 +1,17 @@
 # Configuration file for data generation module
-from datetime import date
-import random
+import pandas as pd
 import numpy as np
+import random
 from faker import Faker
+from datetime import date, datetime, timedelta
+import json
 import os
+from collections import defaultdict
+import matplotlib.pyplot as plt
+import seaborn as sns
+from tqdm.notebook import tqdm
+import warnings
+warnings.filterwarnings('ignore')
 
 TOTAL_DONORS = 50000
 OUTPUT_DIR = "synthetic_donor_dataset"
@@ -11,7 +19,7 @@ START_DATE = date(1940, 1, 1)
 END_DATE = date(2025, 12, 31)
 
 random.seed(42)
-np.random.seed(42)
+rng = np.random.default_rng(42)
 fake = Faker()
 Faker.seed(42)
 
@@ -105,3 +113,69 @@ class DemographicsGenerator:
 # Initialize generator
 demo_gen = DemographicsGenerator()
 print("Demographics generator initialized")
+
+class ConstituentGenerator:
+    def __init__(self):
+        self.primary_weights = {
+            'Alum': 0.55,
+            'Parent': 0.20,
+            'Friend': 0.15,
+            'Foundation': 0.04,
+            'Corporation': 0.03,
+            'Trust': 0.01,
+            'Trustee': 0.015,
+            'Regent': 0.005
+        }
+        
+        self.secondary_roles = ['Alum', 'Parent', 'Friend', None]
+        
+        self.advancement_staff = [
+            'Sarah Chen', 'Michael Rodriguez', 'Jennifer Liu', 'David Park',
+            'Lisa Thompson', 'James Wilson', 'Maria Gonzalez', 'Robert Kim',
+            'Amanda Davis', 'Christopher Lee', 'Nicole Brown', 'Kevin Wu',
+            'Rachel Johnson', 'Mark Williams', 'Emily Zhang'
+        ]
+        
+        self.rating_distribution = {
+            'A': 0.001, 'B': 0.002, 'C': 0.005, 'D': 0.008,
+            'E': 0.012, 'F': 0.025, 'G': 0.040, 'H': 0.060,
+            'I': 0.087, 'J': 0.110, 'K': 0.130, 'L': 0.150,
+            'M': 0.140, 'N': 0.120, 'O': 0.080, 'P': 0.030
+        }
+        
+        self.stage_distribution = {
+            'Identification': 0.45,
+            'Qualification': 0.25,
+            'Cultivation': 0.18,
+            'Solicitation': 0.08,
+            'Stewardship': 0.04
+        }
+    
+    def assign_constituent_types(self):
+        primary = random.choices(list(self.primary_weights.keys()), 
+                               weights=list(self.primary_weights.values()))[0]
+        # 40% chance of having secondary role
+        secondary = random.choice(self.secondary_roles) if random.random() < 0.4 else None
+        return primary, secondary
+    
+    def generate_class_year(self, constituent_type, current_year=2025):
+        if constituent_type not in ['Alum', 'Trustee', 'Regent']:
+            return None
+        # Normal distribution centered around 1995, std dev 20
+        year = int(np.random.normal(1995, 20))
+        return max(1950, min(current_year, year))
+    
+    def assign_manager(self):
+        return random.choice(self.advancement_staff)
+    
+    def assign_rating(self):
+        return random.choices(list(self.rating_distribution.keys()), 
+                             weights=list(self.rating_distribution.values()))[0]
+    
+    def assign_prospect_stage(self):
+        return random.choices(list(self.stage_distribution.keys()), 
+                             weights=list(self.stage_distribution.values()))[0]
+
+# Initialize generator
+const_gen = ConstituentGenerator()
+print("Constituent generator initialized")
