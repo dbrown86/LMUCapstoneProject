@@ -255,3 +255,157 @@ class GivingGenerator:
 # Initialize generator
 giving_gen = GivingGenerator()
 print("Giving generator initialized")
+
+def generate_family_assignments(num_donors, family_percentage=0.30):
+    """Generate family assignments before creating donor records"""
+    print(f"Pre-generating family assignments for {family_percentage*100:.0f}% of donors...")
+    
+    # Determine how many donors will be in families
+    family_donor_count = int(num_donors * family_percentage)
+    
+    # Initialize family tracking
+    family_assignments = {}  # donor_index -> {'Family_ID': int, 'Relationship_Type': str}
+    family_counter = 10000
+    assigned_indices = set()
+    
+    # Create family clusters
+    while len(assigned_indices) < family_donor_count:
+        available_count = family_donor_count - len(assigned_indices)
+        if available_count <= 0:
+            break
+            
+        # Determine family size (weighted toward smaller families)
+        family_size = random.choices([2, 3, 4, 5], weights=[0.5, 0.3, 0.15, 0.05])[0]
+        family_size = min(family_size, available_count)
+        
+        # Select random donor indices for this family
+        available_indices = [i for i in range(num_donors) if i not in assigned_indices]
+        if len(available_indices) < family_size:
+            family_size = len(available_indices)
+        
+        family_members = random.sample(available_indices, family_size)
+        family_id = family_counter
+        family_counter += 1
+        
+        
+        for i, donor_index in enumerate(family_members):
+            if i == 0:
+                rel_type = 'Head'
+            elif i == 1 and family_size >= 2:
+                rel_type = 'Spouse'
+            else:
+                rel_type = random.choice(['Child', 'Parent', 'Sibling'])
+            
+            family_assignments[donor_index] = {
+                'Family_ID': family_id,
+                'Relationship_Type': rel_type
+            }
+            
+            assigned_indices.add(donor_index)
+    
+    print(f"Created {len(set(f['Family_ID'] for f in family_assignments.values()))} families")
+    print(f"Assigned {len(family_assignments)} donors to families")
+    
+    return family_assignments
+
+def generate_core_donors_with_families(num_donors, donor_ids):
+    """Generate core donor information including family relationships"""
+    print(f"Generating {num_donors:,} core donor records with family relationships...")
+    
+    # Pre-generate family assignments
+    family_assignments = generate_family_assignments(num_donors)
+    
+    donors = []
+    relationships = []  # Separate list to track relationships
+    
+    for i in tqdm(range(num_donors), desc="Creating donors with families"):
+        donor_id = donor_ids[i]
+        
+        # Generate names and demographics
+        first_name, last_name, full_name, gender = demo_gen.generate_name()
+        demographics = demo_gen.generate_demographics()
+        
+        # Generate constituent information
+        primary_type, secondary_type = const_gen.assign_constituent_types()
+        class_year = const_gen.generate_class_year(primary_type)
+        
+        # Generate advancement data
+        manager = const_gen.assign_manager()
+        rating = const_gen.assign_rating()
+        prospect_stage = const_gen.assign_prospect_stage()
+        
+        # Generate giving data (random, not rating-based)
+        lifetime_giving = giving_gen.generate_lifetime_giving()
+        last_gift, designation, gift_date = giving_gen.generate_last_gift_data(lifetime_giving)
+        consecutive_years, total_years = giving_gen.generate_giving_patterns(lifetime_giving, class_year)
+        
+        # Check rating vs giving alignment
+        alignment = giving_gen.validate_rating_vs_giving_mismatch(rating, lifetime_giving)
+        
+        # Get family information if assigned
+        family_info = family_assignments.get(i, {})
+        family_id = family_info.get('Family_ID', None)
+        relationship_type = family_info.get('Relationship_Type', None)
+        
+        # Determine family giving potential
+        if family_id is not None:
+            if lifetime_giving > 50000:
+                family_giving_potential = 'High'
+            elif lifetime_giving > 10000:
+                family_giving_potential = 'Medium'
+            else:
+                family_giving_potential = 'Low'
+        else:
+            family_giving_potential = 'Individual'
+        
+        # Create donor record with family fields included
+        donor = {
+            'ID': donor_id,
+            'First_Name': first_name,
+            'Last_Name': last_name,
+            'Full_Name': full_name,
+            'Gender': gender,
+            'Primary_Constituent_Type': primary_type,
+            'Constituent_Type_2': secondary_type,
+            'Class_Year': class_year,
+            'Primary_Manager': manager,
+            'Rating': rating,
+            'Prospect_Stage': prospect_stage,
+            'Lifetime_Giving': lifetime_giving,
+            'Last_Gift': last_gift,
+            'Last_Gift_Designation': designation,
+            'Last_Gift_Date': gift_date,
+            'Consecutive_Yr_Giving_Count': consecutive_years,
+            'Total_Yr_Giving_Count': total_years,
+            'Rating_Giving_Alignment': alignment,
+            'Family_ID': family_id,
+            'Relationship_Type': relationship_type,
+            'Family_Giving_Potential': family_giving_potential,
+            **demographics
+        }
+        
+        donors.append(donor)
+        
+        # If donor has family, add to relationships tracking
+        if family_id is not None:
+            relationships.append({
+                'Donor_ID': donor_id,
+                'Family_ID': family_id,
+                'Relationship_Type': relationship_type
+            })
+    
+    return pd.DataFrame(donors), pd.DataFrame(relationships)
+
+# Generate core donor data with integrated family relationships
+print("=" * 50)
+print("STEP 3: GENERATING CORE DONOR DATA WITH FAMILY RELATIONSHIPS")
+print("=" * 50)
+
+donors_df, relationships_df = generate_core_donors_with_families(TOTAL_DONORS, DONOR_IDS)
+
+print(f"\nGenerated {len(donors_df):,} donor records")
+print(f"Non-donors: {(donors_df['Lifetime_Giving'] == 0).sum():,}")
+print(f"Donors: {(donors_df['Lifetime_Giving'] > 0).sum():,}")
+print(f"Major donors (>$100K): {(donors_df['Lifetime_Giving'] > 100000).sum():,}")
+print(f"Donors in families: {donors_df['Family_ID'].notna().sum():,}")
+print(f"Number of families: {donors_df['Family_ID'].nunique()}")
