@@ -179,3 +179,79 @@ class ConstituentGenerator:
 # Initialize generator
 const_gen = ConstituentGenerator()
 print("Constituent generator initialized")
+
+class GivingGenerator:
+    def __init__(self):
+        self.designations = [
+            'Annual Fund', 'Scholarships', 'Men\'s Basketball', 'Library',
+            'Endowment Fund', 'Capital Campaign', 'Faculty Support',
+             'Greek Life', 'Theatre Arts', 'Aquatic Center',
+            'DEI Initiatives', 'Women\'s Volleyball', 'Alumni Association', 'Study Abroad'
+            'Men\'s Soccer', 'Women\'s Soccer', 'Student Health Center', 'Community Service Center',
+            'Finance Club', 'Engineering Department', 'Club Sports', 'Career Development Center',
+            'Veterans Center', 'Music Department', 'History Department', 'Debate Team', 
+            'Computer Science Department'
+        ]
+    
+    def generate_lifetime_giving(self):
+        """Random lifetime giving using log-normal distribution"""
+        # 40% chance of being a non-donor
+        if random.random() < 0.4:
+            return 0.0
+        
+        # Log-normal distribution parameters
+        mu = 8.5  # log mean (roughly $5K median)
+        sigma = 2.5  # log standard deviation
+        
+        lifetime_giving = rng.lognormal(mu, sigma)
+        lifetime_giving = max(1, min(100000000, lifetime_giving))  # Cap at $100M
+        return round(lifetime_giving, 2)
+    
+    def generate_last_gift_data(self, lifetime_giving):
+        if lifetime_giving == 0:
+            return 0, None, None
+        
+        # Last gift typically 5-50% of lifetime giving
+        percentage = random.uniform(0.05, 0.5)
+        last_gift = lifetime_giving * percentage
+        
+        designation = random.choice(self.designations)
+        
+        # Gift date (weighted toward recent years)
+        years = list(range(1980, 2026))
+        weights = [1 if year < 2010 else (year - 2005) for year in years]
+        gift_year = random.choices(years, weights=weights)[0]
+        
+        start_date = date(gift_year, 1, 1)
+        end_date = date(gift_year, 12, 31)
+        days_diff = (end_date - start_date).days
+        gift_date = start_date + timedelta(days=random.randint(0, days_diff))
+        
+        return round(last_gift, 2), designation, gift_date
+    
+    def generate_giving_patterns(self, lifetime_giving, class_year):
+        if lifetime_giving == 0:
+            return 0, 0
+        
+        # Estimate donor age for realistic patterns
+        current_year = 2025
+        estimated_age = current_year - (class_year or 1980) + 22
+        giving_years_possible = max(1, estimated_age - 25)
+        
+        total_years = random.randint(0, min(50, giving_years_possible))
+        consecutive_years = random.randint(0, min(total_years, 25))
+        
+        return consecutive_years, total_years
+    
+    def validate_rating_vs_giving_mismatch(self, rating, lifetime_giving):
+        """Check for realistic mismatches"""
+        if lifetime_giving == 0 and rating in ['A', 'B', 'C', 'D']:
+            return "High-rated non-donor"
+        elif lifetime_giving > 1000000 and rating in ['M', 'N', 'O', 'P']:
+            return "Major donor, low rating"
+        else:
+            return "Aligned"
+
+# Initialize generator
+giving_gen = GivingGenerator()
+print("Giving generator initialized")
