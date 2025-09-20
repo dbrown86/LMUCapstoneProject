@@ -409,3 +409,245 @@ print(f"Donors: {(donors_df['Lifetime_Giving'] > 0).sum():,}")
 print(f"Major donors (>$100K): {(donors_df['Lifetime_Giving'] > 100000).sum():,}")
 print(f"Donors in families: {donors_df['Family_ID'].notna().sum():,}")
 print(f"Number of families: {donors_df['Family_ID'].nunique()}")
+
+class ContactReportGenerator:
+    def __init__(self):
+        self.subjects = [
+            'scholarship support', 'capital campaign', 'annual giving',
+            'planned giving', 'faculty chair', 'building project',
+            'student programs', 'research funding', 'athletics',
+            'library expansion', 'endowment fund'
+        ]
+        
+        self.positive_outcomes = [
+            'expressed strong interest', 'requested proposal',
+            'wants to think about it', 'indicated support',
+            'asked for more information', 'committed to gift',
+            'interested in legacy giving', 'will discuss with spouse'
+        ]
+        
+        self.negative_outcomes = [
+            'declined to support at this time',
+            'not interested in this initiative',
+            'unable to make a commitment this year',
+            'prefers to support other organizations',
+            'cited economic concerns',
+            'does not wish to be contacted further',
+            'has other philanthropic priorities',
+            'feels disconnected from the university',
+            'requested removal from solicitation lists',
+            'expressed disappointment with recent university decisions'
+        ]
+        
+        self.unresponsive_outcomes = [
+            'has not returned multiple phone calls',
+            'did not respond to email outreach',
+            'was unreachable for scheduled meeting',
+            'has been unresponsive to recent communications',
+            'missed scheduled phone appointment without notice',
+            'did not reply to invitation for campus visit',
+            'has not responded to follow-up attempts',
+            'was unable to connect despite multiple attempts',
+            'requested to reschedule but did not follow through',
+            'phone calls have gone unanswered'
+        ]
+        
+        self.templates = {
+            'positive_meeting': [
+                "Met with {donor_name} at {location} to discuss {subject}. {donor_name} {outcome}.",
+                "Had lunch meeting with {donor_name} regarding {subject}. Discussion focused on {focus_area}. {donor_name} {outcome}.",
+                "Office visit with {donor_name} to review {subject} proposal. {donor_name} asked questions about {detail} and {outcome}."
+            ],
+            'positive_phone': [
+                "Phone call with {donor_name} to discuss {subject}. Conversation lasted {duration} minutes. {donor_name} {outcome}.",
+                "Brief check-in call with {donor_name}. Discussed {subject}. {donor_name} {outcome}."
+            ],
+            'positive_event': [
+                "Spoke with {donor_name} at {event_name}. Discussed {subject}. {donor_name} {outcome}.",
+                "Connected with {donor_name} during {event_name}. Brief conversation about {subject}. {donor_name} {outcome}."
+            ],
+            'solicitation': [
+                "Formal solicitation meeting with {donor_name} for ${amount} gift to {subject}. {donor_name} {outcome}.",
+                "Presented {subject} proposal to {donor_name}. Request amount: ${amount}. {donor_name} {outcome}."
+            ],
+            'stewardship': [
+                "Stewardship call with {donor_name} to thank for recent gift to {subject}. {donor_name} {outcome}.",
+                "Sent impact report to {donor_name} regarding their {subject} support. {donor_name} {outcome}."
+            ],
+            'negative': [
+                "Met with {donor_name} to discuss {subject}. Unfortunately, {donor_name} {outcome}.",
+                "Phone conversation with {donor_name} about potential support for {subject}. {donor_name} {outcome}.",
+                "Solicitation meeting with {donor_name} for {subject} support. {donor_name} {outcome}. Will respect their decision."
+            ],
+            'unresponsive': [
+                "Attempted to contact {donor_name} regarding {subject}. {donor_name} {outcome}. Will try alternative approach.",
+                "Multiple outreach attempts to {donor_name} about {subject}. {donor_name} {outcome}. Considering pause in contact.",
+                "Follow-up with {donor_name} on {subject} proposal. {donor_name} {outcome}. May need to reassess approach."
+            ]
+        }
+    
+    def should_have_contact_report(self, constituent_type, prospect_stage, lifetime_giving):
+        """Determine probability of having a contact report"""
+        base_probability = 0.3  # 30% base chance
+        
+        # Adjust based on constituent type
+        if constituent_type in ['Trustee', 'Regent']:
+            base_probability += 0.6
+        elif constituent_type in ['Alum', 'Parent']:
+            base_probability += 0.2
+        elif constituent_type == 'Friend':
+            base_probability += 0.1
+        
+        # Adjust based on prospect stage
+        stage_multipliers = {
+            'Identification': 0.5, 'Qualification': 1.2,
+            'Cultivation': 1.8, 'Solicitation': 2.0, 'Stewardship': 1.5
+        }
+        base_probability *= stage_multipliers.get(prospect_stage, 1.0)
+        
+        # Donors more likely to have contact reports
+        if lifetime_giving > 0:
+            base_probability += 0.3
+        if lifetime_giving > 100000:
+            base_probability += 0.4
+        
+        return min(0.95, base_probability)
+    
+    def generate_report(self, donor_name, prospect_stage, rating, lifetime_giving, constituent_type):
+        """Generate contact report with realistic outcomes"""
+        # Determine outcome probabilities
+        negative_prob = 0.20
+        unresponsive_prob = 0.15
+        
+        if lifetime_giving == 0:
+            negative_prob += 0.25
+            unresponsive_prob += 0.20
+        
+        if prospect_stage in ['Identification', 'Qualification']:
+            unresponsive_prob += 0.15
+            negative_prob += 0.10
+        
+        if lifetime_giving > 100000:
+            negative_prob -= 0.15
+            unresponsive_prob -= 0.10
+        
+        if prospect_stage == 'Stewardship':
+            negative_prob = 0.05
+            unresponsive_prob = 0.02
+        
+        # Cap probabilities
+        negative_prob = max(0.05, min(0.5, negative_prob))
+        unresponsive_prob = max(0.02, min(0.4, unresponsive_prob))
+        
+        # Choose outcome type
+        outcome_roll = random.random()
+        if outcome_roll < unresponsive_prob:
+            template_type = 'unresponsive'
+            outcome = random.choice(self.unresponsive_outcomes)
+        elif outcome_roll < (unresponsive_prob + negative_prob):
+            template_type = 'negative'
+            outcome = random.choice(self.negative_outcomes)
+        else:
+            # Choose positive template type based on stage
+            if prospect_stage == 'Stewardship':
+                template_type = 'stewardship'
+            elif prospect_stage == 'Solicitation':
+                template_type = random.choice(['solicitation', 'positive_meeting'])
+            else:
+                template_type = random.choice(['positive_meeting', 'positive_phone', 'positive_event'])
+            outcome = random.choice(self.positive_outcomes)
+        
+        template = random.choice(self.templates[template_type])
+        
+        # Fill template variables
+        variables = {
+            'donor_name': donor_name,
+            'subject': random.choice(self.subjects),
+            'outcome': outcome,
+            'location': random.choice(['their office', 'campus', 'restaurant', 'their home']),
+            'focus_area': random.choice(['implementation timeline', 'naming opportunities', 'impact metrics']),
+            'detail': random.choice(['budget breakdown', 'project timeline', 'recognition benefits']),
+            'duration': random.randint(15, 60),
+            'event_name': random.choice(['Alumni Reception', 'Donor Gala', 'President\'s Circle Event']),
+            'amount': f"{random.randint(10, 500):,}" if lifetime_giving > 10000 else f"{random.randint(1, 25):,}"
+        }
+        
+        try:
+            return template.format(**variables)
+        except KeyError:
+            return f"Met with {donor_name} to discuss {variables['subject']}. {outcome}."
+    
+    def generate_contact_date(self):
+        """Generate weighted random date (more recent = higher weight)"""
+        start_date = date(2015, 1, 1)
+        end_date = date(2025, 12, 31)
+        
+        days_range = (end_date - start_date).days
+        weights = [np.exp(-((days_range - i) / 365) * 0.3) for i in range(days_range)]
+        day_offset = random.choices(range(days_range), weights=weights)[0]
+        
+        return start_date + timedelta(days=day_offset)
+
+# Initialize generator
+contact_gen = ContactReportGenerator()
+print("Contact report generator initialized")
+
+def generate_contact_reports(donors_df):
+    """Generate contact reports for eligible donors"""
+    print("Generating contact reports...")
+    
+    contact_reports = []
+    report_id_counter = 500000
+    
+    for _, donor in tqdm(donors_df.iterrows(), total=len(donors_df), desc="Creating contact reports"):
+        # Determine if donor should have contact report
+        probability = contact_gen.should_have_contact_report(
+            donor['Primary_Constituent_Type'],
+            donor['Prospect_Stage'],
+            donor['Lifetime_Giving']
+        )
+        
+        if random.random() < probability:
+            # Generate contact report
+            report_text = contact_gen.generate_report(
+                donor['Full_Name'],
+                donor['Prospect_Stage'],
+                donor['Rating'],
+                donor['Lifetime_Giving'],
+                donor['Primary_Constituent_Type']
+            )
+            
+            contact_date = contact_gen.generate_contact_date()
+            author = const_gen.assign_manager()
+            
+            contact_reports.append({
+                'Contact_Report_ID': report_id_counter,
+                'Donor_ID': donor['ID'],
+                'Contact_Date': contact_date,
+                'Contact_Type': random.choice(['Meeting', 'Phone Call', 'Email', 'Event']),
+                'Author': author,
+                'Report_Text': report_text,
+                'Outcome_Category': 'Positive' if any(pos in report_text.lower() for pos in ['interest', 'support', 'commit']) 
+                                 else 'Unresponsive' if 'unresponsive' in report_text.lower() or 'not return' in report_text.lower()
+                                 else 'Negative'
+            })
+            
+            report_id_counter += 1
+    
+    return pd.DataFrame(contact_reports)
+
+# Generate contact reports
+print("=" * 50)
+print("STEP 5: GENERATING CONTACT REPORTS")
+print("=" * 50)
+
+contact_reports_df = generate_contact_reports(donors_df)
+
+print(f"Created {len(contact_reports_df):,} contact report records")
+print(f"Coverage: {len(contact_reports_df) / len(donors_df) * 100:.1f}% of donors have contact reports")
+
+# Outcome distribution
+outcome_counts = contact_reports_df['Outcome_Category'].value_counts()
+print("\nContact Report Outcomes:")
+for outcome, count in outcome_counts.items():
+    print(f"  {outcome}: {count:,} ({count/len(contact_reports_df)*100:.1f}%)")
