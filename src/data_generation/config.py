@@ -117,16 +117,16 @@ print("Demographics generator initialized")
 class ConstituentGenerator:
     def __init__(self):
         self.primary_weights = {
-            'Alum': 0.55,
-            'Parent': 0.20,
-            'Friend': 0.15,
-            'Foundation': 0.04,
-            'Corporation': 0.03,
-            'Trust': 0.01,
-            'Trustee': 0.015,
-            'Regent': 0.005
-        }
-        
+    'Alum': 0.55,
+    'Parent': 0.20,
+    'Friend': 0.15,
+    'Foundation': 0.04,
+    'Corporation': 0.03,
+    'Trust': 0.01,
+    'Trustee': 0.015,
+    'Regent': 0.005
+}
+
         self.secondary_roles = ['Alum', 'Parent', 'Friend', None]
         
         self.advancement_staff = [
@@ -157,7 +157,7 @@ class ConstituentGenerator:
         # 40% chance of having secondary role
         secondary = random.choice(self.secondary_roles) if random.random() < 0.4 else None
         return primary, secondary
-    
+
     def generate_class_year(self, constituent_type, current_year=2025):
         if constituent_type not in ['Alum', 'Trustee', 'Regent']:
             return None
@@ -255,6 +255,69 @@ class GivingGenerator:
 # Initialize generator
 giving_gen = GivingGenerator()
 print("Giving generator initialized")
+
+
+def generate_giving_history(donors_df):
+    """Generate detailed giving history for donors"""
+    print("Generating detailed giving history...")
+    
+    giving_history = []
+    gift_id_counter = 1000000
+    
+    # Only generate history for actual donors
+    donor_subset = donors_df[donors_df['Lifetime_Giving'] > 0].copy()
+    
+    for _, donor in tqdm(donor_subset.iterrows(), total=len(donor_subset), desc="Creating giving history"):
+        total_years = donor['Total_Yr_Giving_Count']
+        lifetime_giving = donor['Lifetime_Giving']
+        
+        if total_years == 0:
+            continue
+        
+        # Generate giving years
+        current_year = 2025
+        class_year = donor['Class_Year'] if donor['Class_Year'] else 1980
+        earliest_possible = max(1990, class_year + 5)  # Can't give before age ~23
+        
+        # Select random years for giving
+        possible_years = list(range(earliest_possible, current_year + 1))
+        giving_years = sorted(random.sample(possible_years, min(total_years, len(possible_years))))
+        
+        # Distribute lifetime giving across years
+        remaining_amount = lifetime_giving
+        
+        for i, year in enumerate(giving_years):
+            if i == len(giving_years) - 1:  # Last gift gets remaining amount
+                gift_amount = remaining_amount
+            else:
+                # Random percentage of remaining (weighted toward smaller early gifts)
+                percentage = random.uniform(0.05, 0.3)
+                gift_amount = remaining_amount * percentage
+                remaining_amount -= gift_amount
+            
+            gift_amount = max(25, round(gift_amount, 2))  # Minimum $25 gift
+            
+            # Generate gift details
+            gift_month = random.randint(1, 12)
+            gift_day = random.randint(1, 28)  # Safe day for all months
+            
+            giving_history.append({
+                'Gift_ID': gift_id_counter,
+                'Donor_ID': donor['ID'],
+                'Gift_Date': date(year, gift_month, gift_day),
+                'Gift_Amount': gift_amount,
+                'Designation': random.choice(giving_gen.designations),
+                'Gift_Type': random.choice(['Cash', 'Check', 'Credit Card', 'Stock', 'Online']),
+                'Campaign_Year': year if random.random() < 0.3 else None,  # 30% are campaign gifts
+                'Anonymous': random.random() < 0.05  # 5% anonymous
+            })
+            
+            gift_id_counter += 1
+    
+    return pd.DataFrame(giving_history)
+
+
+
 
 def generate_family_assignments(num_donors, family_percentage=0.30):
     """Generate family assignments before creating donor records"""
@@ -409,6 +472,25 @@ print(f"Donors: {(donors_df['Lifetime_Giving'] > 0).sum():,}")
 print(f"Major donors (>$100K): {(donors_df['Lifetime_Giving'] > 100000).sum():,}")
 print(f"Donors in families: {donors_df['Family_ID'].notna().sum():,}")
 print(f"Number of families: {donors_df['Family_ID'].nunique()}")
+
+# Generate detailed giving history
+print("=" * 50)
+print("STEP 6: GENERATING DETAILED GIVING HISTORY")
+print("=" * 50)
+
+giving_history_df = generate_giving_history(donors_df)
+
+print(f"Created {len(giving_history_df):,} individual gift records")
+print(f"Average gifts per donor: {len(giving_history_df) / (donors_df['Lifetime_Giving'] > 0).sum():.1f}")
+
+# Verify totals match
+sample_donor = donors_df[donors_df['Lifetime_Giving'] > 0].iloc[0]
+donor_gifts = giving_history_df[giving_history_df['Donor_ID'] == sample_donor['ID']]
+print(f"\nSample verification - Donor {sample_donor['ID']}:")
+print(f"  Expected lifetime giving: ${sample_donor['Lifetime_Giving']:,.2f}")
+print(f"  Sum of individual gifts: ${donor_gifts['Gift_Amount'].sum():,.2f}")
+print(f"  Expected total years: {sample_donor['Total_Yr_Giving_Count']}")
+print(f"  Actual gift records: {len(donor_gifts)}")
 
 class ContactReportGenerator:
     def __init__(self):
@@ -651,3 +733,136 @@ outcome_counts = contact_reports_df['Outcome_Category'].value_counts()
 print("\nContact Report Outcomes:")
 for outcome, count in outcome_counts.items():
     print(f"  {outcome}: {count:,} ({count/len(contact_reports_df)*100:.1f}%)")
+
+def create_final_tables(donors_df, relationships_df, contact_reports_df, giving_history_df, enhanced_df):
+    """Create final normalized tables"""
+    print("Creating final normalized tables...")
+    
+    # Table 1: Core Donors (already includes family fields)
+    if enhanced_df is not None:
+        donors_final = donors_df.merge(enhanced_df, left_on='ID', right_on='Donor_ID', how='left')
+        donors_final = donors_final.drop('Donor_ID', axis=1)
+    else:
+        donors_final = donors_df.copy()
+    
+    # Table 2: Family Relationships (created during donor generation)
+    relationships_final = relationships_df.copy() if not relationships_df.empty else pd.DataFrame()
+    
+    # Table 3: Contact Reports
+    contact_reports_final = contact_reports_df.copy() if not contact_reports_df.empty else pd.DataFrame()
+    
+    # Table 4: Giving History
+    giving_history_final = giving_history_df.copy() if not giving_history_df.empty else pd.DataFrame()
+    
+    return donors_final, relationships_final, contact_reports_final, giving_history_final
+
+# Create final tables
+print("=" * 50)
+print("STEP 7: CREATING FINAL TABLES")
+print("=" * 50)
+
+donors_final, relationships_final, contact_reports_final, giving_history_final = create_final_tables(
+    donors_df, relationships_df, contact_reports_df, giving_history_df, None
+)
+
+print("Final table sizes:")
+print(f"  Donors: {len(donors_final):,} rows, {len(donors_final.columns)} columns")
+print(f"  Relationships: {len(relationships_final):,} rows")
+print(f"  Contact Reports: {len(contact_reports_final):,} rows")
+print(f"  Giving History: {len(giving_history_final):,} rows")
+
+# Show family integration
+family_donors = donors_final['Family_ID'].notna().sum()
+print(f"\nFamily Integration:")
+print(f"  Donors with family info: {family_donors:,} ({family_donors/len(donors_final)*100:.1f}%)")
+print(f"  Unique families: {donors_final['Family_ID'].nunique()}")
+print(f"  Family relationship types: {donors_final['Relationship_Type'].value_counts().to_dict()}")
+
+def validate_dataset(donors_df, relationships_df, contact_reports_df, giving_history_df):
+    """Perform comprehensive data quality validation"""
+    print("Performing data quality validation...")
+    
+    validation_results = {
+        'errors': [],
+        'warnings': [],
+        'stats': {}
+    }
+    
+    # 1. Check for duplicate IDs
+    if donors_df['ID'].duplicated().any():
+        validation_results['errors'].append("Duplicate donor IDs found")
+    
+    # 2. Validate giving totals
+    giving_summary = giving_history_df.groupby('Donor_ID')['Gift_Amount'].sum()
+    lifetime_giving = donors_df.set_index('ID')['Lifetime_Giving']
+    
+    mismatches = 0
+    for donor_id in giving_summary.index:
+        if donor_id in lifetime_giving.index:
+            expected = lifetime_giving[donor_id]
+            actual = giving_summary[donor_id]
+            if abs(expected - actual) > 1.0:  # Allow for rounding differences
+                mismatches += 1
+    
+    if mismatches > 0:
+        validation_results['warnings'].append(f"{mismatches} donors have giving total mismatches")
+    
+    # 3. Check logical constraints
+    invalid_last_gift = (donors_df['Last_Gift'] > donors_df['Lifetime_Giving']).sum()
+    if invalid_last_gift > 0:
+        validation_results['errors'].append(f"{invalid_last_gift} donors have last gift > lifetime giving")
+    
+    invalid_consecutive = (donors_df['Consecutive_Yr_Giving_Count'] > donors_df['Total_Yr_Giving_Count']).sum()
+    if invalid_consecutive > 0:
+        validation_results['errors'].append(f"{invalid_consecutive} donors have consecutive > total years")
+    
+    # 4. Check date ranges
+    future_gifts = giving_history_df[giving_history_df['Gift_Date'] > date.today()]
+    if len(future_gifts) > 0:
+        validation_results['errors'].append(f"{len(future_gifts)} gifts dated in the future")
+    
+    # 5. Calculate statistics
+    validation_results['stats'] = {
+        'total_donors': len(donors_df),
+        'non_donors': (donors_df['Lifetime_Giving'] == 0).sum(),
+        'major_donors_100k': (donors_df['Lifetime_Giving'] > 100000).sum(),
+        'contact_report_coverage': len(contact_reports_df) / len(donors_df) * 100,
+        'family_coverage': len(relationships_df) / len(donors_df) * 100,
+        'total_gifts': len(giving_history_df),
+        'total_giving': donors_df['Lifetime_Giving'].sum(),
+        'rating_distribution': donors_df['Rating'].value_counts().to_dict()
+    }
+    
+    return validation_results
+
+# Run validation
+print("=" * 50)
+print("STEP 9: DATA QUALITY VALIDATION")
+print("=" * 50)
+
+validation_results = validate_dataset(donors_final, relationships_final, contact_reports_final, giving_history_final)
+
+print("Validation Results:")
+print("\nErrors:")
+if validation_results['errors']:
+    for error in validation_results['errors']:
+        print(f"  ❌ {error}")
+else:
+    print("  ✅ No errors found")
+
+print("\nWarnings:")
+if validation_results['warnings']:
+    for warning in validation_results['warnings']:
+        print(f"  ⚠️ {warning}")
+else:
+    print("  ✅ No warnings")
+
+print(f"\nDataset Statistics:")
+stats = validation_results['stats']
+print(f"  Total Donors: {stats['total_donors']:,}")
+print(f"  Non-Donors: {stats['non_donors']:,} ({stats['non_donors']/stats['total_donors']*100:.1f}%)")
+print(f"  Major Donors (>$100K): {stats['major_donors_100k']:,}")
+print(f"  Contact Report Coverage: {stats['contact_report_coverage']:.1f}%")
+print(f"  Family Coverage: {stats['family_coverage']:.1f}%")
+print(f"  Total Gifts: {stats['total_gifts']:,}")
+print(f"  Total Giving: ${stats['total_giving']:,.2f}")
