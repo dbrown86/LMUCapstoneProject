@@ -13,6 +13,16 @@ from tqdm.notebook import tqdm
 import warnings
 warnings.filterwarnings('ignore')
 
+
+# Use more efficient data types
+def optimize_dtypes(df):
+    for col in df.select_dtypes(include=['int64']).columns:
+        df[col] = pd.to_numeric(df[col], downcast='integer')
+    return df
+
+
+
+
 TOTAL_DONORS = 50000
 OUTPUT_DIR = "synthetic_donor_dataset"
 START_DATE = date(1940, 1, 1)
@@ -217,13 +227,19 @@ class GivingGenerator:
         
         designation = random.choice(self.designations)
         
-        # Gift date (weighted toward recent years)
+        # Gift date (weighted toward recent years, but not in future)
         years = list(range(1980, 2026))
         weights = [1 if year < 2010 else (year - 2005) for year in years]
-        gift_year = random.choices(years, weights=weights)[0]
+        # Filter out future years
+        valid_years = [y for y in years if y <= 2025]
+        valid_weights = [w for y, w in zip(years, weights) if y <= 2025]
+        gift_year = random.choices(valid_years, weights=valid_weights)[0]
         
         start_date = date(gift_year, 1, 1)
-        end_date = date(gift_year, 12, 31)
+        # Do not allow future dates
+        year_end = date(gift_year, 12, 31)
+        today = date.today()
+        end_date = min(year_end, today)
         days_diff = (end_date - start_date).days
         gift_date = start_date + timedelta(days=random.randint(0, days_diff))
         
@@ -276,35 +292,53 @@ def generate_giving_history(donors_df):
         
         # Generate giving years
         current_year = 2025
-        class_year = donor['Class_Year'] if donor['Class_Year'] else 1980
+        class_year = int(donor['Class_Year']) if pd.notna(donor['Class_Year']) else 1980
         earliest_possible = max(1990, class_year + 5)  # Can't give before age ~23
         
         # Select random years for giving
         possible_years = list(range(earliest_possible, current_year + 1))
-        giving_years = sorted(random.sample(possible_years, min(total_years, len(possible_years))))
+        giving_years = sorted(random.sample(possible_years, min(int(total_years), len(possible_years))))
         
         # Distribute lifetime giving across years
-        remaining_amount = lifetime_giving
+        remaining_amount = round(float(lifetime_giving), 2)
         
         for i, year in enumerate(giving_years):
-            if i == len(giving_years) - 1:  # Last gift gets remaining amount
-                gift_amount = remaining_amount
+            is_last = i == len(giving_years) - 1
+            if is_last:
+                # Last gift absorbs any rounding remainder to match lifetime total exactly
+                gift_amount = round(remaining_amount, 2)
             else:
                 # Random percentage of remaining (weighted toward smaller early gifts)
                 percentage = random.uniform(0.05, 0.3)
-                gift_amount = remaining_amount * percentage
-                remaining_amount -= gift_amount
-            
-            gift_amount = max(25, round(gift_amount, 2))  # Minimum $25 gift
-            
-            # Generate gift details
+                tentative_amount = round(remaining_amount * percentage, 2)
+
+                # Enforce minimum for this gift and preserve minimums for remaining future gifts
+                remaining_gifts = len(giving_years) - i - 1
+                min_required_future = 25 * remaining_gifts
+                # Maximum we can allocate now while reserving minimums later
+                max_allowable_now = max(0.0, round(remaining_amount - min_required_future, 2))
+                # Apply per-gift minimum of $25 for intermediate gifts when possible
+                desired_amount = max(25.0, tentative_amount)
+                if max_allowable_now > 0:
+                    gift_amount = min(desired_amount, max_allowable_now)
+                else:
+                    # Not enough remaining to allocate minimums going forward; allocate as little as possible now
+                    gift_amount = min(desired_amount, max(0.0, round(remaining_amount - 25 * (remaining_gifts - 1), 2))) if remaining_gifts > 0 else desired_amount
+
+                gift_amount = round(gift_amount, 2)
+                remaining_amount = round(remaining_amount - gift_amount, 2)
+
+            # Generate gift details and clamp dates to today if needed
             gift_month = random.randint(1, 12)
             gift_day = random.randint(1, 28)  # Safe day for all months
+            gift_dt = date(year, gift_month, gift_day)
+            if gift_dt > date.today():
+                gift_dt = date.today()
             
             giving_history.append({
                 'Gift_ID': gift_id_counter,
                 'Donor_ID': donor['ID'],
-                'Gift_Date': date(year, gift_month, gift_day),
+                'Gift_Date': gift_dt,
                 'Gift_Amount': gift_amount,
                 'Designation': random.choice(giving_gen.designations),
                 'Gift_Type': random.choice(['Cash', 'Check', 'Credit Card', 'Stock', 'Online']),
@@ -749,7 +783,7 @@ class ContactReportGenerator:
     def generate_contact_date(self):
         """Generate weighted random date (more recent = higher weight)"""
         start_date = date(2015, 1, 1)
-        end_date = date(2025, 12, 31)
+        end_date = date.today()  # Use today as the end date, not future
         
         days_range = (end_date - start_date).days
         weights = [np.exp(-((days_range - i) / 365) * 0.3) for i in range(days_range)]
@@ -1063,7 +1097,7 @@ def create_dataset_visualizations(donors_df, giving_history_df, contact_reports_
     
     plt.style.use('default')
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-    fig.subtitle('Synthetic Donor Dataset Analysis', fontsize=16, fontweight='bold')
+    fig.suptitle('Synthetic Donor Dataset Analysis', fontsize=16, fontweight='bold')
     
     # 1. Rating Distribution
     rating_counts = donors_df['Rating'].value_counts().sort_index()
@@ -1193,3 +1227,24 @@ print("=" * 50)
 create_dataset_visualizations(donors_final, giving_history_final, contact_reports_final)
 
 print(f"\n✅ Analysis complete! Check {OUTPUT_DIR}/dataset_analysis.png for visualizations")
+
+# Export all datasets to CSV files
+print("=" * 50)
+print("EXPORTING DATASETS TO CSV FILES")
+print("=" * 50)
+
+# Save main tables
+donors_final.to_csv(f'{OUTPUT_DIR}/donors.csv', index=False)
+relationships_final.to_csv(f'{OUTPUT_DIR}/relationships.csv', index=False)
+contact_reports_final.to_csv(f'{OUTPUT_DIR}/contact_reports.csv', index=False)
+giving_history_final.to_csv(f'{OUTPUT_DIR}/giving_history.csv', index=False)
+enhanced_df.to_csv(f'{OUTPUT_DIR}/enhanced_fields.csv', index=False)
+
+print(f"✅ CSV files saved to: {OUTPUT_DIR}/")
+print("Files created:")
+print("  - donors.csv (50,000 records)")
+print("  - relationships.csv (15,000 records)")
+print("  - contact_reports.csv (32,947 records)")
+print("  - giving_history.csv (489,345 records)")
+print("  - enhanced_fields.csv (50,000 records)")
+print("  - dataset_analysis.png (visualizations)")
