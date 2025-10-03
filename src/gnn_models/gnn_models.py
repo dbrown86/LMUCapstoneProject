@@ -415,13 +415,26 @@ class GCNModel(nn.Module):
         return x
 
 class DonorGNNTrainer:
-    """Complete training pipeline for donor GNN models"""
+    """Complete training pipeline for donor GNN models with class imbalance handling"""
     
-    def __init__(self, model, device, lr=0.01, weight_decay=5e-4):
+    def __init__(self, model, device, lr=0.01, weight_decay=5e-4, class_weights=None, auto_weights=True):
         self.model = model.to(device)
         self.device = device
         self.optimizer = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-        self.criterion = nn.CrossEntropyLoss()
+        
+        # Handle class weights for imbalanced datasets
+        if class_weights is not None:
+            self.criterion = nn.CrossEntropyLoss(weight=class_weights.to(device))
+            print(f"Using provided class weights: {class_weights}")
+        elif auto_weights:
+            # Will be set when data is available
+            self.criterion = None
+            self.auto_weights = True
+            print("Auto class weights enabled - will calculate from data")
+        else:
+            self.criterion = nn.CrossEntropyLoss()
+            print("No class weights - using standard CrossEntropyLoss")
+        
         self.scheduler = torch.optim.lr_scheduler.StepLR(self.optimizer, step_size=50, gamma=0.5)
         
         # Training history
@@ -429,24 +442,86 @@ class DonorGNNTrainer:
         self.val_losses = []
         self.train_accs = []
         self.val_accs = []
+        self.train_f1s = []
+        self.val_f1s = []
+        self.train_aucs = []
+        self.val_aucs = []
     
-    def create_masks(self, data, train_ratio=0.6, val_ratio=0.2):
-        """Create train/validation/test masks"""
+    def create_masks(self, data, train_ratio=0.6, val_ratio=0.2, stratify=True):
+        """Create train/validation/test masks with optional stratification"""
         num_nodes = data.num_nodes
-        indices = torch.randperm(num_nodes)
         
-        train_size = int(train_ratio * num_nodes)
-        val_size = int(val_ratio * num_nodes)
+        if stratify:
+            # Use stratified sampling to maintain class distribution
+            print("Using stratified sampling for train/test splits...")
+            return self._create_stratified_masks(data, train_ratio, val_ratio)
+        else:
+            # Original random sampling
+            indices = torch.randperm(num_nodes)
+            train_size = int(train_ratio * num_nodes)
+            val_size = int(val_ratio * num_nodes)
+            
+            train_mask = torch.zeros(num_nodes, dtype=torch.bool)
+            val_mask = torch.zeros(num_nodes, dtype=torch.bool)
+            test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+            
+            train_mask[indices[:train_size]] = True
+            val_mask[indices[train_size:train_size + val_size]] = True
+            test_mask[indices[train_size + val_size:]] = True
+            
+            return train_mask, val_mask, test_mask
+    
+    def _create_stratified_masks(self, data, train_ratio=0.6, val_ratio=0.2):
+        """Create stratified masks using sklearn's train_test_split"""
+        from sklearn.model_selection import train_test_split
         
-        train_mask = torch.zeros(num_nodes, dtype=torch.bool)
-        val_mask = torch.zeros(num_nodes, dtype=torch.bool)
-        test_mask = torch.zeros(num_nodes, dtype=torch.bool)
+        indices = torch.arange(data.num_nodes)
+        y = data.y.cpu().numpy()
         
-        train_mask[indices[:train_size]] = True
-        val_mask[indices[train_size:train_size + val_size]] = True
-        test_mask[indices[train_size + val_size:]] = True
+        # First split: train vs (val + test)
+        train_idx, temp_idx = train_test_split(
+            indices, test_size=1-train_ratio, 
+            stratify=y, random_state=42
+        )
+        
+        # Second split: val vs test from remaining data
+        temp_y = y[temp_idx]
+        val_idx, test_idx = train_test_split(
+            temp_idx, test_size=0.5, 
+            stratify=temp_y, random_state=42
+        )
+        
+        # Create masks
+        train_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        val_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        test_mask = torch.zeros(data.num_nodes, dtype=torch.bool)
+        
+        train_mask[train_idx] = True
+        val_mask[val_idx] = True
+        test_mask[test_idx] = True
+        
+        # Print class distribution in each split
+        self._print_split_distribution(data.y, train_mask, val_mask, test_mask)
         
         return train_mask, val_mask, test_mask
+    
+    def _print_split_distribution(self, y, train_mask, val_mask, test_mask):
+        """Print class distribution in each split"""
+        train_counts = torch.bincount(y[train_mask])
+        val_counts = torch.bincount(y[val_mask])
+        test_counts = torch.bincount(y[test_mask])
+        
+        print(f"Train split: {train_mask.sum()} samples - Class distribution: {train_counts.tolist()}")
+        print(f"Val split: {val_mask.sum()} samples - Class distribution: {val_counts.tolist()}")
+        print(f"Test split: {test_mask.sum()} samples - Class distribution: {test_counts.tolist()}")
+        
+        # Check if stratification worked
+        total_counts = torch.bincount(y)
+        train_ratio = train_counts.float() / total_counts.float()
+        val_ratio = val_counts.float() / total_counts.float()
+        test_ratio = test_counts.float() / total_counts.float()
+        
+        print(f"Class ratios - Train: {train_ratio.tolist()}, Val: {val_ratio.tolist()}, Test: {test_ratio.tolist()}")
     
     def train_epoch(self, data, train_mask):
         """Train for one epoch"""
@@ -469,46 +544,76 @@ class DonorGNNTrainer:
         return loss.item(), acc.item()
     
     def evaluate(self, data, mask):
-        """Evaluate model"""
+        """Evaluate model with comprehensive metrics"""
         self.model.eval()
         with torch.no_grad():
             out = self.model(data.x, data.edge_index)
-            loss = self.criterion(out[mask], data.y[mask])
+            
+            if self.criterion is not None:
+                loss = self.criterion(out[mask], data.y[mask])
+            else:
+                # Fallback if criterion not set yet
+                loss = F.cross_entropy(out[mask], data.y[mask])
+            
             pred = out[mask].argmax(dim=1)
             acc = (pred == data.y[mask]).float().mean()
             
-            # Calculate AUC if binary classification
+            # Calculate comprehensive metrics
+            y_true = data.y[mask].cpu().numpy()
+            y_pred = pred.cpu().numpy()
+            y_probs = F.softmax(out[mask], dim=1).cpu().numpy()
+            
+            # AUC calculation
             if out.shape[1] == 2:
-                probs = F.softmax(out[mask], dim=1)[:, 1]
                 try:
-                    auc = roc_auc_score(data.y[mask].cpu(), probs.cpu())
+                    from sklearn.metrics import roc_auc_score
+                    auc = roc_auc_score(y_true, y_probs[:, 1])
                 except:
                     auc = 0.5
             else:
                 auc = 0.0
+            
+            # F1 score calculation
+            try:
+                from sklearn.metrics import f1_score
+                f1 = f1_score(y_true, y_pred, average='weighted')
+            except:
+                f1 = 0.0
         
-        return loss.item(), acc.item(), auc
+        return loss.item(), acc.item(), auc, f1
     
-    def train(self, data, epochs=200, early_stopping_patience=20):
-        """Complete training loop"""
-        print("Starting training...")
+    def train(self, data, epochs=200, early_stopping_patience=20, stratify=True):
+        """Complete training loop with class imbalance handling"""
+        print("Starting training with class imbalance handling...")
         
         # Move data to device
         data = data.to(self.device)
         
-        # Create masks
-        train_mask, val_mask, test_mask = self.create_masks(data)
-        print(f"Train: {train_mask.sum()}, Val: {val_mask.sum()}, Test: {test_mask.sum()}")
+        # Set up class weights if auto_weights is enabled
+        if hasattr(self, 'auto_weights') and self.auto_weights and self.criterion is None:
+            class_counts = torch.bincount(data.y)
+            class_weights = 1.0 / class_counts.float()
+            class_weights = class_weights / class_weights.sum() * len(class_weights)
+            self.criterion = nn.CrossEntropyLoss(weight=class_weights.to(self.device))
+            print(f"Auto-calculated class weights: {class_weights}")
+            print(f"Class distribution: {class_counts.tolist()}")
         
-        best_val_acc = 0
+        # Create masks with stratification
+        train_mask, val_mask, test_mask = self.create_masks(data, stratify=stratify)
+        
+        best_val_auc = 0  # Use AUC instead of accuracy for early stopping
         patience_counter = 0
         
         for epoch in tqdm(range(epochs), desc="Training"):
             # Train
             train_loss, train_acc = self.train_epoch(data, train_mask)
             
-            # Validate
-            val_loss, val_acc, val_auc = self.evaluate(data, val_mask)
+            # Validate with comprehensive metrics
+            val_loss, val_acc, val_auc, val_f1 = self.evaluate(data, val_mask)
+            
+            # Calculate train metrics for monitoring
+            with torch.no_grad():
+                train_loss_eval, train_acc_eval, train_auc, train_f1 = self.evaluate(data, train_mask)
             
             # Update scheduler
             self.scheduler.step()
@@ -516,12 +621,16 @@ class DonorGNNTrainer:
             # Store metrics
             self.train_losses.append(train_loss)
             self.val_losses.append(val_loss)
-            self.train_accs.append(train_acc)
+            self.train_accs.append(train_acc_eval)
             self.val_accs.append(val_acc)
+            self.train_aucs.append(train_auc)
+            self.val_aucs.append(val_auc)
+            self.train_f1s.append(train_f1)
+            self.val_f1s.append(val_f1)
             
-            # Early stopping
-            if val_acc > best_val_acc:
-                best_val_acc = val_acc
+            # Early stopping based on AUC (better for imbalanced data)
+            if val_auc > best_val_auc:
+                best_val_auc = val_auc
                 patience_counter = 0
                 # Save best model
                 torch.save(self.model.state_dict(), 'best_donor_gnn_model.pt')
@@ -529,52 +638,94 @@ class DonorGNNTrainer:
                 patience_counter += 1
             
             if patience_counter >= early_stopping_patience:
-                print(f"Early stopping at epoch {epoch}")
+                print(f"Early stopping at epoch {epoch} (best val AUC: {best_val_auc:.4f})")
                 break
             
-            # Print progress
+            # Print progress with comprehensive metrics
             if epoch % 20 == 0:
-                print(f"Epoch {epoch:03d}: Train Acc: {train_acc:.4f}, Val Acc: {val_acc:.4f}, Val AUC: {val_auc:.4f}")
+                print(f"Epoch {epoch:03d}: Train Acc: {train_acc_eval:.4f}, Val Acc: {val_acc:.4f}, "
+                      f"Train AUC: {train_auc:.4f}, Val AUC: {val_auc:.4f}, Val F1: {val_f1:.4f}")
         
         # Load best model and evaluate on test set
         self.model.load_state_dict(torch.load('best_donor_gnn_model.pt'))
-        test_loss, test_acc, test_auc = self.evaluate(data, test_mask)
+        test_loss, test_acc, test_auc, test_f1 = self.evaluate(data, test_mask)
         
         print(f"\nTraining completed!")
-        print(f"Best validation accuracy: {best_val_acc:.4f}")
+        print(f"Best validation AUC: {best_val_auc:.4f}")
         print(f"Test accuracy: {test_acc:.4f}")
         print(f"Test AUC: {test_auc:.4f}")
+        print(f"Test F1: {test_f1:.4f}")
+        
+        # Print per-class performance
+        self._print_per_class_performance(data, test_mask)
         
         return {
-            'best_val_acc': best_val_acc,
+            'best_val_auc': best_val_auc,
             'test_acc': test_acc,
             'test_auc': test_auc,
+            'test_f1': test_f1,
             'train_mask': train_mask,
             'val_mask': val_mask,
             'test_mask': test_mask
         }
     
+    def _print_per_class_performance(self, data, test_mask):
+        """Print per-class performance metrics"""
+        self.model.eval()
+        with torch.no_grad():
+            out = self.model(data.x, data.edge_index)
+            pred = out[test_mask].argmax(dim=1)
+            y_true = data.y[test_mask].cpu().numpy()
+            y_pred = pred.cpu().numpy()
+            
+            try:
+                from sklearn.metrics import classification_report
+                print("\nPer-class Performance:")
+                print(classification_report(y_true, y_pred, target_names=['Class 0', 'Class 1']))
+            except:
+                print("Could not generate classification report")
+    
     def plot_training_curves(self):
-        """Plot training and validation curves"""
-        fig, axes = plt.subplots(1, 2, figsize=(12, 5))
+        """Plot comprehensive training and validation curves"""
+        fig, axes = plt.subplots(2, 2, figsize=(15, 10))
         
         # Loss curves
-        axes[0].plot(self.train_losses, label='Train Loss', alpha=0.7)
-        axes[0].plot(self.val_losses, label='Val Loss', alpha=0.7)
-        axes[0].set_xlabel('Epoch')
-        axes[0].set_ylabel('Loss')
-        axes[0].set_title('Training and Validation Loss')
-        axes[0].legend()
-        axes[0].grid(True, alpha=0.3)
+        axes[0, 0].plot(self.train_losses, label='Train Loss', alpha=0.7)
+        axes[0, 0].plot(self.val_losses, label='Val Loss', alpha=0.7)
+        axes[0, 0].set_xlabel('Epoch')
+        axes[0, 0].set_ylabel('Loss')
+        axes[0, 0].set_title('Training and Validation Loss')
+        axes[0, 0].legend()
+        axes[0, 0].grid(True, alpha=0.3)
         
         # Accuracy curves
-        axes[1].plot(self.train_accs, label='Train Acc', alpha=0.7)
-        axes[1].plot(self.val_accs, label='Val Acc', alpha=0.7)
-        axes[1].set_xlabel('Epoch')
-        axes[1].set_ylabel('Accuracy')
-        axes[1].set_title('Training and Validation Accuracy')
-        axes[1].legend()
-        axes[1].grid(True, alpha=0.3)
+        axes[0, 1].plot(self.train_accs, label='Train Acc', alpha=0.7)
+        axes[0, 1].plot(self.val_accs, label='Val Acc', alpha=0.7)
+        axes[0, 1].set_xlabel('Epoch')
+        axes[0, 1].set_ylabel('Accuracy')
+        axes[0, 1].set_title('Training and Validation Accuracy')
+        axes[0, 1].legend()
+        axes[0, 1].grid(True, alpha=0.3)
+        
+        # AUC curves (important for imbalanced data)
+        if self.train_aucs:
+            axes[1, 0].plot(self.train_aucs, label='Train AUC', alpha=0.7)
+            axes[1, 0].plot(self.val_aucs, label='Val AUC', alpha=0.7)
+            axes[1, 0].set_xlabel('Epoch')
+            axes[1, 0].set_ylabel('AUC')
+            axes[1, 0].set_title('Training and Validation AUC')
+            axes[1, 0].legend()
+            axes[1, 0].grid(True, alpha=0.3)
+        
+        # F1 Score curves
+        if self.train_f1s:
+            axes[1, 1].plot(self.train_f1s, label='Train F1', alpha=0.7)
+            axes[1, 1].plot(self.val_f1s, label='Val F1', alpha=0.7)
+            axes[1, 1].set_xlabel('Epoch')
+            axes[1, 1].set_ylabel('F1 Score')
+            axes[1, 1].set_title('Training and Validation F1 Score')
+            axes[1, 1].legend()
+            axes[1, 1].grid(True, alpha=0.3)
         
         plt.tight_layout()
         plt.show()
