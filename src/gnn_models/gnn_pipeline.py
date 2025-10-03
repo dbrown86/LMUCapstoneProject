@@ -90,24 +90,24 @@ def main_gnn_pipeline(donors_df, relationships_df, contact_reports_df=None, givi
     
     print(f"Models initialized with input_dim={input_dim}, hidden_dim={hidden_dim}")
     
-    # Step 4: Train GraphSAGE
+    # Step 4: Train GraphSAGE with class imbalance handling
     print("\n" + "=" * 60)
-    print("STEP 4: GRAPHSAGE TRAINING")
+    print("STEP 4: GRAPHSAGE TRAINING (WITH CLASS IMBALANCE HANDLING)")
     print("=" * 60)
     
-    sage_trainer = DonorGNNTrainer(sage_model, device, lr=0.01, weight_decay=5e-4)
-    sage_results = sage_trainer.train(graph_data, epochs=200, early_stopping_patience=20)
+    sage_trainer = DonorGNNTrainer(sage_model, device, lr=0.01, weight_decay=5e-4, auto_weights=True)
+    sage_results = sage_trainer.train(graph_data, epochs=200, early_stopping_patience=20, stratify=True)
     
     print("\nGraphSAGE Training Curves:")
     sage_trainer.plot_training_curves()
     
-    # Step 5: Train GCN
+    # Step 5: Train GCN with class imbalance handling
     print("\n" + "=" * 60)
-    print("STEP 5: GCN TRAINING")
+    print("STEP 5: GCN TRAINING (WITH CLASS IMBALANCE HANDLING)")
     print("=" * 60)
     
-    gcn_trainer = DonorGNNTrainer(gcn_model, device, lr=0.01, weight_decay=5e-4)
-    gcn_results = gcn_trainer.train(graph_data, epochs=200, early_stopping_patience=20)
+    gcn_trainer = DonorGNNTrainer(gcn_model, device, lr=0.01, weight_decay=5e-4, auto_weights=True)
+    gcn_results = gcn_trainer.train(graph_data, epochs=200, early_stopping_patience=20, stratify=True)
     
     print("\nGCN Training Curves:")
     gcn_trainer.plot_training_curves()
@@ -121,7 +121,8 @@ def main_gnn_pipeline(donors_df, relationships_df, contact_reports_df=None, givi
         'Model': ['GraphSAGE', 'GCN'],
         'Test_Accuracy': [sage_results['test_acc'], gcn_results['test_acc']],
         'Test_AUC': [sage_results['test_auc'], gcn_results['test_auc']],
-        'Best_Val_Acc': [sage_results['best_val_acc'], gcn_results['best_val_acc']]
+        'Test_F1': [sage_results['test_f1'], gcn_results['test_f1']],
+        'Best_Val_AUC': [sage_results['best_val_auc'], gcn_results['best_val_auc']]
     })
     
     print("Model Performance Comparison:")
@@ -132,9 +133,9 @@ def main_gnn_pipeline(donors_df, relationships_df, contact_reports_df=None, givi
     print("STEP 7: ADVANCED ANALYSIS")
     print("=" * 60)
     
-    # Node embedding analysis
-    best_model = sage_trainer.model if sage_results['test_acc'] > gcn_results['test_acc'] else gcn_trainer.model
-    best_trainer = sage_trainer if sage_results['test_acc'] > gcn_results['test_acc'] else gcn_trainer
+    # Node embedding analysis - use AUC instead of accuracy for model selection
+    best_model = sage_trainer.model if sage_results['test_auc'] > gcn_results['test_auc'] else gcn_trainer.model
+    best_trainer = sage_trainer if sage_results['test_auc'] > gcn_results['test_auc'] else gcn_trainer
     
     embeddings = get_node_embeddings(best_model, graph_data, device)
     visualize_embeddings(embeddings, graph_data.y.cpu().numpy(), donors_df)
