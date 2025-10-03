@@ -3,7 +3,7 @@ import pandas as pd
 import numpy as np
 import random
 from datetime import date, timedelta
-from tqdm.notebook import tqdm
+from tqdm import tqdm
 from .data_generation import DemographicsGenerator, ConstituentGenerator, GivingGenerator, ContactReportGenerator
 
 def generate_random_ids(count, min_id=100000, max_id=999999):
