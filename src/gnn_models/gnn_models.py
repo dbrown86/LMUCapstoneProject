@@ -17,7 +17,7 @@ from sklearn.decomposition import TruncatedSVD
 from sklearn.manifold import TSNE
 from sklearn.metrics.pairwise import cosine_similarity
 import matplotlib.pyplot as plt
-from tqdm.notebook import tqdm
+from tqdm import tqdm  # Use regular tqdm instead of notebook version
 import warnings
 warnings.filterwarnings('ignore')
 
