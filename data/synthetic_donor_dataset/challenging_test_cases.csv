@@ -1,0 +1,8 @@
+Donor_ID,Report_Text,Outcome_Category,Contact_Date,Contact_Method,Contact_Duration
+TEST_1,"Donor was very interested in our cause and asked many questions. However, they mentioned they recently lost their job and cannot commit to anything right now.",Negative,2024-01-01,Phone,30
+TEST_2,"The donor seemed disinterested and kept checking their phone. But at the end, they wrote a check for $500.",Positive,2024-01-01,Phone,30
+TEST_3,Had a long conversation about the organization's mission. Donor was very engaged and asked for more information. Will follow up next week.,Positive,2024-01-01,Phone,30
+TEST_4,Donor was polite but clearly not interested. They said they support other charities and cannot help us at this time.,Negative,2024-01-01,Phone,30
+TEST_5,The call went to voicemail. Left a detailed message about our campaign. No response after 3 attempts.,Unresponsive,2024-01-01,Phone,30
+TEST_6,Met the donor at a charity event. They were friendly and asked about our programs. Exchanged business cards.,Positive,2024-01-01,Phone,30
+TEST_7,Donor requested to be removed from our mailing list. They were polite but firm about not wanting future contact.,Negative,2024-01-01,Phone,30
