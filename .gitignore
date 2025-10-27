@@ -33,6 +33,10 @@ Thumbs.db
 # Jupyter Notebook
 .ipynb_checkpoints/
 
+# Cache directories
+cache/
+*.cache
+
 # Distribution / packaging
 dist/
 build/
@@ -54,6 +58,12 @@ quick_*.py
 check_*.py
 extract_*_fixed.py
 extract_*_only.py
+
+
+
+
+
+
 
 
 
