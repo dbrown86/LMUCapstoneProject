@@ -59,6 +59,11 @@ check_*.py
 extract_*_fixed.py
 extract_*_only.py
 
+# Large data files
+data/synthetic_donor_dataset_500k_dense/*.csv
+data/synthetic_donor_dataset_500k_dense/*.db
+data/synthetic_donor_dataset_500k_dense/*.parquet
+
 
 
 
