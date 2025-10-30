@@ -1,8 +1,8 @@
 # Data validation and visualization functions
 import pandas as pd
 import numpy as np
-import matplotlib.pyplot as plt
-import seaborn as sns
+# import matplotlib.pyplot as plt  # Lazy import to prevent hanging
+# import seaborn as sns  # Lazy import to prevent hanging
 from datetime import date
 
 def validate_dataset(donors_df, relationships_df, contact_reports_df, giving_history_df):
@@ -153,6 +153,10 @@ def validate_dataset(donors_df, relationships_df, contact_reports_df, giving_his
 def create_dataset_visualizations(donors_df, giving_history_df, contact_reports_df, output_dir):
     """Create visualizations for dataset analysis"""
     print("Creating dataset visualizations...")
+    
+    # Lazy import to prevent hanging on module import
+    import matplotlib.pyplot as plt
+    import seaborn as sns
     
     plt.style.use('default')
     fig, axes = plt.subplots(2, 3, figsize=(18, 12))
