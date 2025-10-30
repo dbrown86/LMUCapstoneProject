@@ -2,13 +2,15 @@
 import pandas as pd
 import numpy as np
 import random
-from faker import Faker
+# from faker import Faker  # Not used - commented out to prevent hanging
 from datetime import date, datetime, timedelta
 import os
 from collections import defaultdict
-import matplotlib.pyplot as plt
-import seaborn as sns
-from tqdm.notebook import tqdm
+# import matplotlib  # Not used - commented out to prevent hanging
+# matplotlib.use('Agg')  # Use non-GUI backend (prevents hanging)
+# import matplotlib.pyplot as plt  # Not used - commented out to prevent hanging
+# import seaborn as sns  # Not used - commented out to prevent hanging
+from tqdm import tqdm  # Use regular tqdm (not notebook version)
 import warnings
 warnings.filterwarnings('ignore')
 
