@@ -1,0 +1,561 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Architecture Diagram</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            padding: 30px;
+            min-height: 100vh;
+        }
+
+        .container {
+            max-width: 1800px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 20px;
+            padding: 50px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.4);
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 50px;
+            padding-bottom: 30px;
+            border-bottom: 3px solid #e0e0e0;
+        }
+
+        .header h1 {
+            font-size: 2.8em;
+            color: #1a237e;
+            margin-bottom: 10px;
+        }
+
+        .header h2 {
+            font-size: 1.4em;
+            color: #5c6bc0;
+            font-weight: normal;
+        }
+
+        .architecture {
+            display: flex;
+            flex-direction: column;
+            gap: 40px;
+        }
+
+        /* Layer styling */
+        .layer {
+            display: flex;
+            align-items: center;
+            gap: 30px;
+            animation: fadeInLeft 0.8s ease backwards;
+        }
+
+        .layer:nth-child(1) { animation-delay: 0.1s; }
+        .layer:nth-child(2) { animation-delay: 0.2s; }
+        .layer:nth-child(3) { animation-delay: 0.3s; }
+        .layer:nth-child(4) { animation-delay: 0.4s; }
+        .layer:nth-child(5) { animation-delay: 0.5s; }
+        .layer:nth-child(6) { animation-delay: 0.6s; }
+
+        .layer-number {
+            min-width: 60px;
+            height: 60px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border-radius: 50%;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.5em;
+            font-weight: bold;
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.4);
+            flex-shrink: 0;
+        }
+
+        .layer-content {
+            flex: 1;
+            background: #f8f9fa;
+            border-radius: 15px;
+            padding: 25px;
+            border-left: 5px solid;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.08);
+            transition: all 0.3s ease;
+        }
+
+        .layer-content:hover {
+            transform: translateX(10px);
+            box-shadow: 0 8px 25px rgba(0,0,0,0.15);
+        }
+
+        .layer:nth-child(1) .layer-content { border-color: #e91e63; }
+        .layer:nth-child(2) .layer-content { border-color: #9c27b0; }
+        .layer:nth-child(3) .layer-content { border-color: #3f51b5; }
+        .layer:nth-child(4) .layer-content { border-color: #2196f3; }
+        .layer:nth-child(5) .layer-content { border-color: #009688; }
+        .layer:nth-child(6) .layer-content { border-color: #ff9800; }
+
+        .layer-title {
+            font-size: 1.4em;
+            font-weight: bold;
+            color: #1a237e;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .layer-icon {
+            font-size: 1.2em;
+        }
+
+        .layer-description {
+            color: #546e7a;
+            font-size: 1em;
+            margin-bottom: 15px;
+            line-height: 1.6;
+        }
+
+        .components {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            margin-top: 15px;
+        }
+
+        .component {
+            background: white;
+            padding: 8px 16px;
+            border-radius: 20px;
+            font-size: 0.9em;
+            color: #37474f;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            font-weight: 500;
+            transition: all 0.3s ease;
+        }
+
+        .component:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+        }
+
+        /* Connector arrows */
+        .connector {
+            display: flex;
+            justify-content: center;
+            margin: -20px 0;
+            position: relative;
+            z-index: 1;
+        }
+
+        .arrow-down {
+            width: 0;
+            height: 0;
+            border-left: 20px solid transparent;
+            border-right: 20px solid transparent;
+            border-top: 30px solid #667eea;
+            animation: bounce 2s ease-in-out infinite;
+        }
+
+        /* Model Architecture Box */
+        .model-architecture {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            border-radius: 15px;
+            margin: 20px 0;
+            box-shadow: 0 8px 25px rgba(102, 126, 234, 0.4);
+        }
+
+        .model-title {
+            font-size: 1.6em;
+            font-weight: bold;
+            text-align: center;
+            margin-bottom: 20px;
+        }
+
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 20px;
+        }
+
+        .model-component {
+            background: rgba(255,255,255,0.15);
+            padding: 20px;
+            border-radius: 10px;
+            text-align: center;
+            backdrop-filter: blur(10px);
+            border: 2px solid rgba(255,255,255,0.3);
+            transition: all 0.3s ease;
+        }
+
+        .model-component:hover {
+            background: rgba(255,255,255,0.25);
+            transform: scale(1.05);
+        }
+
+        .model-component-title {
+            font-size: 1.2em;
+            font-weight: bold;
+            margin-bottom: 8px;
+        }
+
+        .model-component-desc {
+            font-size: 0.9em;
+            opacity: 0.9;
+        }
+
+        /* Data flow indicators */
+        .data-flow {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+            margin-top: 15px;
+            padding-top: 15px;
+            border-top: 2px dashed #e0e0e0;
+        }
+
+        .flow-label {
+            font-weight: bold;
+            color: #5c6bc0;
+            font-size: 0.9em;
+        }
+
+        .flow-items {
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+        }
+
+        .flow-item {
+            background: #e8eaf6;
+            padding: 5px 12px;
+            border-radius: 15px;
+            font-size: 0.85em;
+            color: #3f51b5;
+            font-weight: 500;
+        }
+
+        @keyframes fadeInLeft {
+            from {
+                opacity: 0;
+                transform: translateX(-50px);
+            }
+            to {
+                opacity: 1;
+                transform: translateX(0);
+            }
+        }
+
+        @keyframes bounce {
+            0%, 100% {
+                transform: translateY(0);
+            }
+            50% {
+                transform: translateY(-10px);
+            }
+        }
+
+        /* Stats footer */
+        .stats-footer {
+            margin-top: 50px;
+            padding: 30px;
+            background: linear-gradient(135deg, #f5f7fa 0%, #c3cfe2 100%);
+            border-radius: 15px;
+            display: flex;
+            justify-content: space-around;
+            flex-wrap: wrap;
+            gap: 20px;
+        }
+
+        .stat {
+            text-align: center;
+        }
+
+        .stat-value {
+            font-size: 2em;
+            font-weight: bold;
+            color: #1a237e;
+        }
+
+        .stat-label {
+            font-size: 0.9em;
+            color: #546e7a;
+            margin-top: 5px;
+        }
+
+        @media (max-width: 1200px) {
+            .model-grid {
+                grid-template-columns: repeat(2, 1fr);
+            }
+        }
+
+        @media (max-width: 768px) {
+            .layer {
+                flex-direction: column;
+                align-items: flex-start;
+            }
+            .model-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🏗️ Multimodal Fusion Architecture</h1>
+            <h2>End-to-End Deep Learning Pipeline for Donor Prediction</h2>
+        </div>
+
+        <div class="architecture">
+            <!-- Layer 1: Data Generation -->
+            <div class="layer">
+                <div class="layer-number">1</div>
+                <div class="layer-content">
+                    <div class="layer-title">
+                        <span class="layer-icon">📊</span>
+                        Synthetic Data Generation
+                    </div>
+                    <div class="layer-description">
+                        Created realistic donor dataset with temporal patterns, demographics, and behavioral features
+                    </div>
+                    <div class="components">
+                        <div class="component">500K Donors</div>
+                        <div class="component">2021-2024 Timeline</div>
+                        <div class="component">Demographics</div>
+                        <div class="component">Donation History</div>
+                        <div class="component">Campaign Interactions</div>
+                    </div>
+                    <div class="data-flow">
+                        <span class="flow-label">Output →</span>
+                        <div class="flow-items">
+                            <span class="flow-item">PostgreSQL Database</span>
+                            <span class="flow-item">Parquet Files</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector"><div class="arrow-down"></div></div>
+
+            <!-- Layer 2: Data Processing -->
+            <div class="layer">
+                <div class="layer-number">2</div>
+                <div class="layer-content">
+                    <div class="layer-title">
+                        <span class="layer-icon">⚙️</span>
+                        Data Preprocessing & Cleaning
+                    </div>
+                    <div class="layer-description">
+                        Comprehensive data cleaning, transformation, and quality assurance pipeline
+                    </div>
+                    <div class="components">
+                        <div class="component">Missing Value Handling</div>
+                        <div class="component">Outlier Detection</div>
+                        <div class="component">Data Validation</div>
+                        <div class="component">Type Conversion</div>
+                        <div class="component">Duplicate Removal</div>
+                    </div>
+                    <div class="data-flow">
+                        <span class="flow-label">Output →</span>
+                        <div class="flow-items">
+                            <span class="flow-item">Cleaned Dataset</span>
+                            <span class="flow-item">Quality Reports</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector"><div class="arrow-down"></div></div>
+
+            <!-- Layer 3: Feature Engineering -->
+            <div class="layer">
+                <div class="layer-number">3</div>
+                <div class="layer-content">
+                    <div class="layer-title">
+                        <span class="layer-icon">🔧</span>
+                        Advanced Feature Engineering
+                    </div>
+                    <div class="layer-description">
+                        Multi-dimensional feature extraction from temporal, network, and behavioral data
+                    </div>
+                    <div class="components">
+                        <div class="component">RFM Analysis</div>
+                        <div class="component">Network Features (PageRank)</div>
+                        <div class="component">Temporal Patterns</div>
+                        <div class="component">Engagement Metrics</div>
+                        <div class="component">Statistical Aggregations</div>
+                        <div class="component">Text Embeddings</div>
+                    </div>
+                    <div class="data-flow">
+                        <span class="flow-label">Output →</span>
+                        <div class="flow-items">
+                            <span class="flow-item">50+ Features</span>
+                            <span class="flow-item">Graph Structure</span>
+                            <span class="flow-item">Text Vectors</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector"><div class="arrow-down"></div></div>
+
+            <!-- Layer 4: Model Architecture -->
+            <div class="layer">
+                <div class="layer-number">4</div>
+                <div class="layer-content">
+                    <div class="layer-title">
+                        <span class="layer-icon">🤖</span>
+                        Multimodal Fusion Model Training
+                    </div>
+                    <div class="layer-description">
+                        Deep learning architecture combining multiple neural network types for comprehensive prediction
+                    </div>
+                    
+                    <div class="model-architecture">
+                        <div class="model-title">🧠 Neural Network Components</div>
+                        <div class="model-grid">
+                            <div class="model-component">
+                                <div class="model-component-title">🔗 GNN</div>
+                                <div class="model-component-desc">Graph Neural Network for donor relationships</div>
+                            </div>
+                            <div class="model-component">
+                                <div class="model-component-title">🔄 RNN</div>
+                                <div class="model-component-desc">Recurrent layers for sequential patterns</div>
+                            </div>
+                            <div class="model-component">
+                                <div class="model-component-title">📝 LSTM</div>
+                                <div class="model-component-desc">Long-term temporal dependencies</div>
+                            </div>
+                            <div class="model-component">
+                                <div class="model-component-title">🖼️ CNN</div>
+                                <div class="model-component-desc">Convolutional layers for feature extraction</div>
+                            </div>
+                            <div class="model-component">
+                                <div class="model-component-title">📊 MLP</div>
+                                <div class="model-component-desc">Multi-layer perceptron for tabular data</div>
+                            </div>
+                            <div class="model-component">
+                                <div class="model-component-title">🔗 Fusion Layer</div>
+                                <div class="model-component-desc">Combines all modality outputs</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="components">
+                        <div class="component">Train: 2021-2022</div>
+                        <div class="component">Validation: 2023</div>
+                        <div class="component">Test: 2024</div>
+                        <div class="component">Adam Optimizer</div>
+                        <div class="component">Cross-Entropy Loss</div>
+                        <div class="component">Early Stopping</div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector"><div class="arrow-down"></div></div>
+
+            <!-- Layer 5: Evaluation -->
+            <div class="layer">
+                <div class="layer-number">5</div>
+                <div class="layer-content">
+                    <div class="layer-title">
+                        <span class="layer-icon">📈</span>
+                        Model Evaluation & Interpretation
+                    </div>
+                    <div class="layer-description">
+                        Comprehensive performance analysis and explainability assessment
+                    </div>
+                    <div class="components">
+                        <div class="component">AUC-ROC: 94.88%</div>
+                        <div class="component">Precision-Recall</div>
+                        <div class="component">Confusion Matrix</div>
+                        <div class="component">SHAP Analysis</div>
+                        <div class="component">Feature Importance</div>
+                        <div class="component">Temporal Validation</div>
+                    </div>
+                    <div class="data-flow">
+                        <span class="flow-label">Output →</span>
+                        <div class="flow-items">
+                            <span class="flow-item">Performance Metrics</span>
+                            <span class="flow-item">Visualizations</span>
+                            <span class="flow-item">Model Weights</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="connector"><div class="arrow-down"></div></div>
+
+            <!-- Layer 6: Deployment -->
+            <div class="layer">
+                <div class="layer-number">6</div>
+                <div class="layer-content">
+                    <div class="layer-title">
+                        <span class="layer-icon">📱</span>
+                        Interactive Dashboard Deployment
+                    </div>
+                    <div class="layer-description">
+                        Full-featured Streamlit application with real-time predictions and insights
+                    </div>
+                    <div class="components">
+                        <div class="component">Streamlit Framework</div>
+                        <div class="component">5 Interactive Pages</div>
+                        <div class="component">Real-time Predictions</div>
+                        <div class="component">Data Visualizations</div>
+                        <div class="component">Model Insights</div>
+                        <div class="component">User Interface</div>
+                    </div>
+                    <div class="data-flow">
+                        <span class="flow-label">Features →</span>
+                        <div class="flow-items">
+                            <span class="flow-item">Overview</span>
+                            <span class="flow-item">EDA</span>
+                            <span class="flow-item">Predictions</span>
+                            <span class="flow-item">Performance</span>
+                            <span class="flow-item">Insights</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Stats Footer -->
+        <div class="stats-footer">
+            <div class="stat">
+                <div class="stat-value">500K</div>
+                <div class="stat-label">Synthetic Donors</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">50+</div>
+                <div class="stat-label">Engineered Features</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">6</div>
+                <div class="stat-label">Neural Net Types</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">94.88%</div>
+                <div class="stat-label">AUC Score</div>
+            </div>
+            <div class="stat">
+                <div class="stat-value">5</div>
+                <div class="stat-label">Dashboard Pages</div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
