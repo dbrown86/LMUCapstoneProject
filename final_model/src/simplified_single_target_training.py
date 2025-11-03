@@ -1633,7 +1633,12 @@ def main():
     # Load data
     print("\n📂 Loading data...")
     
-    donors_path = 'data/parquet_export/donors_with_network_features.parquet'
+    # Resolve paths relative to script location
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    project_root = os.path.dirname(os.path.dirname(script_dir))
+    data_dir = os.path.join(project_root, 'data', 'parquet_export')
+    
+    donors_path = os.path.join(data_dir, 'donors_with_network_features.parquet')
     donors_df = pd.read_parquet(donors_path)
     print(f"   • Total donors: {len(donors_df):,}")
     
@@ -1645,7 +1650,7 @@ def main():
         donors_df = donors_df.head(SUBSET_SIZE).copy()
         donor_ids_subset = set(donors_df['ID'].values)
     
-    giving_path = 'data/parquet_export/giving_history.parquet'
+    giving_path = os.path.join(data_dir, 'giving_history.parquet')
     giving_df = pd.read_parquet(giving_path)
     # CRITICAL: Ensure Gift_Date is datetime for proper filtering
     giving_df['Gift_Date'] = pd.to_datetime(giving_df['Gift_Date'])
@@ -1664,7 +1669,7 @@ def main():
     # Load relationships for network analysis
     relationships_df = None
     try:
-        relationships_path = 'data/parquet_export/relationships.parquet'
+        relationships_path = os.path.join(data_dir, 'relationships.parquet')
         relationships_df = pd.read_parquet(relationships_path)
         print(f"   • Total relationships: {len(relationships_df):,}")
     except:
@@ -1674,7 +1679,7 @@ def main():
     contact_reports_df = None
     has_text = False
     try:
-        contact_reports_path = 'data/parquet_export/contact_reports.parquet'
+        contact_reports_path = os.path.join(data_dir, 'contact_reports.parquet')
         contact_reports_df = pd.read_parquet(contact_reports_path)
         contact_reports_df['Contact_Date'] = pd.to_datetime(contact_reports_df['Contact_Date'])
         contact_reports_df = contact_reports_df[contact_reports_df['Contact_Date'] < '2024-01-01'].copy()
@@ -1842,6 +1847,12 @@ def main():
     selected_features = importance_df.head(top_n)['feature'].tolist()
     tabular_cols = selected_features
     combined_features_df = combined_features_df[selected_features]
+    
+    # CRITICAL: Save mutual information feature importance BEFORE feature selection changes
+    # This is needed by inference script to use the same 60 features
+    os.makedirs('results', exist_ok=True)
+    importance_df.to_csv('results/feature_importance_influential_donor.csv', index=False)
+    print(f"   💾 Saved feature importance to results/feature_importance_influential_donor.csv (for inference)")
     
     print(f"   ✅ Selected top {len(selected_features)} features (from {len(importance_df)})")
     print(f"   ⚡ This will reduce training time by ~40%")
@@ -2536,10 +2547,13 @@ def main():
     for i, (feature, importance) in enumerate(sorted_features[:10]):
         print(f"   {i+1:2d}. {feature}: {importance:.4f}")
     
-    # Save feature importance
-    importance_df = pd.DataFrame(sorted_features, columns=['feature', 'importance'])
-    importance_df.to_csv('results/feature_importance_influential_donor.csv', index=False)
-    print(f"   ✅ Feature importance saved to results/feature_importance_influential_donor.csv")
+    # Save correlation-based feature importance (for interpretability)
+    # NOTE: This does NOT overwrite the mutual information importance saved earlier
+    # which is used by the inference script for feature selection
+    correlation_importance_df = pd.DataFrame(sorted_features, columns=['feature', 'importance'])
+    correlation_importance_df.to_csv('results/feature_importance_correlation_influential_donor.csv', index=False)
+    print(f"   ✅ Correlation-based feature importance saved to results/feature_importance_correlation_influential_donor.csv")
+    print(f"   ℹ️  Note: Mutual information importance (used for inference) already saved earlier")
     
     # Final summary
     total_time = time.time() - start_time
