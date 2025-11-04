@@ -1762,92 +1762,176 @@ def page_dashboard(df, regions, donor_types, segments, prob_threshold):
         st.markdown('</div>', unsafe_allow_html=True)
         st.caption("💡 **What this means**: Geographic distribution helps identify regional opportunities. Consider regional campaigns for concentrated areas.")
     
-    # Prediction Distribution
+    # Prediction Distribution (Simple, Non-Technical) — tiered summary bar
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-    st.markdown("#### 🎯 Prediction Probability Distribution")
-    
-    fig_dist = go.Figure()
-    
-    fig_dist.add_trace(go.Histogram(
-        x=df_filtered['predicted_prob'],
-        nbinsx=50,
-        marker=dict(
-            color=df_filtered['predicted_prob'],
-            colorscale='RdYlGn',
-            line=dict(color='white', width=1)
+    st.markdown("#### 🎯 Who Will Give Again in 2024 — Confidence Tiers")
+
+    # Prefer the true Will_Give_Again_Probability column when available
+    prob_col_dist = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df_filtered.columns else 'predicted_prob'
+    outcome_col_dist = 'Gave_Again_In_2024' if 'Gave_Again_In_2024' in df_filtered.columns else ('actual_gave' if 'actual_gave' in df_filtered.columns else None)
+
+    probs_all = pd.to_numeric(df_filtered[prob_col_dist], errors='coerce') if prob_col_dist in df_filtered.columns else pd.Series(dtype=float)
+    total_n = int(probs_all.notna().sum())
+
+    # Define intuitive tiers
+    tiers = [
+        {"name": "Low", "range": (0.0, 0.40), "color": "#f44336"},
+        {"name": "Medium", "range": (0.40, 0.70), "color": "#ffc107"},
+        {"name": "High", "range": (0.70, 1.00), "color": "#4caf50"}
+    ]
+
+    tier_data = []
+    for t in tiers:
+        lo, hi = t["range"]
+        mask = probs_all.ge(lo) & probs_all.lt(hi)
+        n = int(mask.sum())
+        pct = (n / total_n * 100.0) if total_n > 0 else 0.0
+        conv = None
+        if outcome_col_dist is not None and outcome_col_dist in df_filtered.columns:
+            outcomes = pd.to_numeric(df_filtered.loc[mask, outcome_col_dist], errors='coerce')
+            if outcomes.notna().any():
+                conv = float(outcomes.mean())
+        tier_data.append({"name": t["name"], "n": n, "pct": pct, "conv": conv, "color": t["color"]})
+
+    # Build a single stacked horizontal bar where each segment shows share of donors
+    fig_tiers = go.Figure()
+    cumulative = 0
+    for td in tier_data:
+        label = f"{td['name']} ({td['n']:,} donors)"
+        if td["conv"] is not None:
+            label += f"\nGave Again: {td['conv']:.0%}"
+        fig_tiers.add_trace(go.Bar(
+            x=[td['pct']],
+            y=["Donors"],
+            orientation='h',
+            name=td['name'],
+            marker=dict(color=td['color']),
+            text=[f"{td['pct']:.0f}%"],
+            textposition='inside',
+            insidetextanchor='middle',
+            hovertemplate=label + '<extra></extra>'
+        ))
+
+    fig_tiers.update_layout(
+        height=140,
+        barmode='stack',
+        showlegend=True,
+        xaxis=dict(
+            range=[0, 100],
+            title='% of Donors',
+            showgrid=True,
+            gridcolor='#e0e0e0'
         ),
-        hovertemplate='Probability: %{x:.2f}<br>Count: %{y}<extra></extra>'
-    ))
-    
-    fig_dist.add_vline(
-        x=prob_threshold,
-        line_dash="dash",
-        line_color="red",
-        annotation_text=f"Threshold: {prob_threshold:.0%}",
-        annotation_position="top"
-    )
-    
-    fig_dist.update_layout(
-        height=400,
-        xaxis_title="Prediction Probability",
-        yaxis_title="Number of Donors",
+        yaxis=dict(showticklabels=False),
         plot_bgcolor='rgba(0,0,0,0)',
         paper_bgcolor='rgba(0,0,0,0)',
-        xaxis=dict(showgrid=False),
-        yaxis=dict(showgrid=True, gridcolor='#e0e0e0'),
-        margin=dict(t=20, b=60, l=20, r=20)
+        margin=dict(t=10, b=10, l=20, r=20),
+        legend=dict(
+            orientation='h',
+            yanchor='bottom', y=1.05,
+            xanchor='center', x=0.5
+        )
     )
-    
-    # X-axis confidence guide labels
-    fig_dist.add_annotation(
-        x=0.1, y=-0.18, xref='x', yref='paper',
-        text='Lower confidence', showarrow=False,
-        font=dict(color='#666')
-    )
-    fig_dist.add_annotation(
-        x=0.9, y=-0.18, xref='x', yref='paper',
-        text='Higher confidence', showarrow=False,
-        font=dict(color='#666')
-    )
-    
-    _plotly_chart_silent(fig_dist, width='stretch')
+
+    _plotly_chart_silent(fig_tiers, width='stretch')
     st.markdown('</div>', unsafe_allow_html=True)
-    st.caption("💡 **What this means**: Most predictions should cluster on the right (high probability) for effective targeting. The red line shows your threshold for classifying 'likely to give'.")
     
-    # Trend Analysis Section
-    st.markdown("### 📈 Trend Analysis & Performance Over Time")
+    # Simple, friendly explanation
+    if outcome_col_dist is not None and any(td['conv'] is not None for td in tier_data):
+        high = next((td for td in tier_data if td['name'] == 'High'), {"n": 0, "pct": 0, "conv": None})
+        st.caption(f"💡 **How to read**: Most donors fall into Low/Medium/High confidence. The High group has {high['pct']:.0f}% of donors and a higher 'gave again' rate, so prioritize them.")
+    else:
+        st.caption("💡 **How to read**: Donors are grouped into Low/Medium/High based on predicted probability. Focus outreach on the High group first.")
+    
+    # Trend Analysis Section (header removed)
     
     if 'predicted_prob' in df_filtered.columns:
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("#### 📊 Performance by Segment")
-            if 'segment' in df_filtered.columns and 'predicted_prob' in df_filtered.columns:
-                segment_perf = _get_segment_performance(df_filtered)
-                segment_perf.columns = ['Segment', 'Avg Probability', 'Count']
+            st.markdown("#### 📊 Performance by Constituency Type")
+            # Use normalized donor_type if available
+            donor_type_col = 'donor_type' if 'donor_type' in df_filtered.columns else None
+            prob_col_ct = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df_filtered.columns else ('predicted_prob' if 'predicted_prob' in df_filtered.columns else None)
+            outcome_col_ct = 'Gave_Again_In_2024' if 'Gave_Again_In_2024' in df_filtered.columns else ('actual_gave' if 'actual_gave' in df_filtered.columns else None)
+
+            if donor_type_col is not None and prob_col_ct is not None:
+                # Build per-constituency metrics based on Will Give Again 2024 predictions and outcomes (if present)
+                df_ct = df_filtered[[donor_type_col]].copy()
+                df_ct['prob'] = pd.to_numeric(df_filtered[prob_col_ct], errors='coerce')
+                if outcome_col_ct is not None and outcome_col_ct in df_filtered.columns:
+                    df_ct['outcome'] = pd.to_numeric(df_filtered[outcome_col_ct], errors='coerce')
                 
-                fig_seg_perf = go.Figure()
-                fig_seg_perf.add_trace(go.Bar(
-                    x=segment_perf['Segment'],
-                    y=segment_perf['Avg Probability'],
-                    marker_color=['#4caf50', '#8bc34a', '#ffc107', '#ff5722'][:len(segment_perf)],
-                    text=segment_perf['Avg Probability'].apply(lambda x: f"{x:.1%}"),
-                    textposition='outside'
-                ))
-                
-                # Set y-axis range with fixed maximum of 0.44
-                y_max = 0.44
-                y_min = max(0.0, segment_perf['Avg Probability'].min() * 0.9)  # 10% padding below
-                
-                fig_seg_perf.update_layout(
-                    title='Average Prediction Probability by Segment',
+                # Aggregate (median for probability) without counting on the grouped key to avoid duplicate column on reset_index
+                group_obj = df_ct.groupby(donor_type_col, observed=False)
+                perf_ct = group_obj['prob'].median().to_frame('Med_Prob')
+                if 'outcome' in df_ct.columns:
+                    perf_ct['outcome'] = group_obj['outcome'].mean()
+                perf_ct['Count'] = group_obj.size().values
+                perf_ct = perf_ct.reset_index().rename(columns={donor_type_col: 'Constituency'})
+
+                # Sort by Med_Prob descending for readability
+                perf_ct = perf_ct.sort_values('Med_Prob', ascending=False)
+
+                # Build bar chart with hover showing conversion if available
+                fig_ct = go.Figure()
+                hover_tmpl = '<b>%{x}</b><br>Median Probability: %{y:.1%}'
+
+                # Color each donor type distinctly (applies to median bars)
+                palette = ['#4caf50', '#2196f3', '#ff9800', '#9c27b0', '#e91e63', '#00bcd4', '#8bc34a', '#ffc107', '#795548', '#607d8b']
+                colors = [palette[i % len(palette)] for i in range(len(perf_ct))]
+                if 'outcome' in perf_ct.columns:
+                    # Median prediction probability by constituency (colored per donor type)
+                    fig_ct.add_trace(go.Bar(
+                        x=perf_ct['Constituency'],
+                        y=perf_ct['Med_Prob'],
+                        marker_color=colors,
+                        text=perf_ct['Med_Prob'].apply(lambda v: f"{v:.1%}"),
+                        textposition='outside',
+                        customdata=np.c_[perf_ct['Count'].values, perf_ct['outcome'].values],
+                        hovertemplate=hover_tmpl + '<br>Donors: %{customdata[0]:,}<br>Gave Again Rate: %{customdata[1]:.1%}<extra></extra>'
+                    ))
+                    # Overlay: Gave-again rate as a line over the bars
+                    fig_ct.add_trace(go.Scatter(
+                        x=perf_ct['Constituency'],
+                        y=perf_ct['outcome'],
+                        mode='lines+markers',
+                        name='Gave Again Rate',
+                        line=dict(color='#2E86AB', width=3),
+                        marker=dict(size=8, color='#2E86AB'),
+                        hovertemplate='<b>%{x}</b><br>Gave Again Rate: %{y:.1%}<extra></extra>'
+                    ))
+                else:
+                    # Median prediction probability by constituency (no outcomes available)
+                    fig_ct.add_trace(go.Bar(
+                        x=perf_ct['Constituency'],
+                        y=perf_ct['Med_Prob'],
+                        marker_color=colors,
+                        text=perf_ct['Med_Prob'].apply(lambda v: f"{v:.1%}"),
+                        textposition='outside',
+                        customdata=np.c_[perf_ct['Count'].values],
+                        hovertemplate=hover_tmpl + '<br>Donors: %{customdata[0]:,}<extra></extra>'
+                    ))
+
+                # Y axis from 0 to max with padding, cap at 1.0
+                # Y-axis max accounts for both median prob and outcome rate (if present)
+                base_max = perf_ct['Med_Prob'].max() if len(perf_ct) else 0.5
+                if 'outcome' in perf_ct.columns:
+                    base_max = max(base_max, perf_ct['outcome'].max())
+                y_max_ct = float(min(1.0, max(0.1, base_max * 1.15)))
+                fig_ct.update_layout(
+                    title='Median Prediction Probability by Constituency Type',
                     yaxis_title='Probability',
-                    height=400,
-                    yaxis=dict(range=[y_min, y_max], showgrid=True, gridcolor='#e0e0e0'),
-                    margin=dict(t=60, b=50, l=50, r=50)  # Add margins to prevent cutoff
+                    height=420,
+                    yaxis=dict(range=[0, y_max_ct], showgrid=True, gridcolor='#e0e0e0'),
+                    xaxis=dict(showgrid=False),
+                    margin=dict(t=60, b=80, l=50, r=50),
+                    legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
                 )
-                _plotly_chart_silent(fig_seg_perf, width='stretch')
-                st.caption("💡 **What this means**: Recent donors typically have higher predicted probabilities. This helps prioritize outreach efforts.")
+                _plotly_chart_silent(fig_ct, width='stretch')
+                st.caption("💡 **What this means**: Shows average 'will give again in 2024' prediction by constituency type. Where shown, the hover also includes the actual gave-again rate from outcomes.")
+            else:
+                st.info("Constituency type or prediction probabilities not available to render this chart.")
         
         with col2:
             st.markdown("#### 📅 Seasonal Patterns (Simulated)")
@@ -1883,139 +1967,14 @@ def page_dashboard(df, regions, donor_types, segments, prob_threshold):
                 _plotly_chart_silent(fig_seasonal, width='stretch')
                 st.caption("💡 **What this means**: Giving tends to peak in Q4 (holiday season) and early Q1 (new year). Plan campaigns accordingly.")
         
-        # Model Performance Stability
-        st.markdown("#### 🔍 Model Performance Over Time (Simulated)")
-        if 'predicted_prob' in df_filtered.columns:
-            # Get metrics
-            metrics_dash = get_model_metrics(df_filtered)
-            base_auc = metrics_dash.get('auc', 0.95) if metrics_dash else 0.95
-            # Simulate slight variation in AUC over time
-            np.random.seed(42)  # For reproducibility
-            auc_over_time = [base_auc + np.random.normal(0, 0.01) for _ in range(12)]
-            auc_over_time = np.clip(auc_over_time, 0.85, 1.0)
-            weeks = [f"Week {i+1}" for i in range(12)]
-            
-            fig_time = go.Figure()
-            fig_time.add_trace(go.Scatter(
-                x=weeks,
-                y=auc_over_time,
-                mode='lines+markers',
-                name='AUC Score',
-                line=dict(color='#4caf50', width=3),
-                marker=dict(size=8),
-                fill='tonexty'
-            ))
-            fig_time.add_hline(
-                y=base_auc * 0.95,
-                line_dash="dash",
-                line_color="red",
-                annotation_text="Alert Threshold"
-            )
-            fig_time.update_layout(
-                title='Model Performance Stability Over 12 Weeks',
-                yaxis_title='AUC Score',
-                xaxis_title='Time',
-                height=350
-            )
-            _plotly_chart_silent(fig_time, width='stretch')
-            st.caption("💡 **What this means**: Monitor model performance over time. If AUC drops below 95% of baseline, investigate data drift.")
+        
     
-    # Model in Action Section
-    st.markdown("### ⚡ Model in Action")
-    
+    # Model in Action Section (debug elements removed)
     if 'predicted_prob' in df_filtered.columns:
         high_prob_count = (df_filtered['predicted_prob'] >= 0.7).sum()
         medium_prob_count = ((df_filtered['predicted_prob'] >= 0.4) & (df_filtered['predicted_prob'] < 0.7)).sum()
-        
-        # DEBUG: Comprehensive tracing of where 1.0 values come from
-        if 'predicted_prob' in df_filtered.columns:
-            prob_check = df_filtered['predicted_prob'].copy()
-            ones_before = (prob_check == 1.0).sum()
-            max_before = prob_check.max()
-            
-            # Show comprehensive debug info
-            with st.expander("🔍 DEBUG: Probability Value Tracing (Click to investigate)", expanded=(ones_before > 0)):
-                st.markdown("### 📊 Data Pipeline Trace")
-                
-                # 1. Check what was loaded
-                if 'prob_debug_info' in st.session_state:
-                    debug_info = st.session_state['prob_debug_info']
-                    st.write("**1. After loading from parquet (process_dataframe):**")
-                    st.write(f"   - Max value: {debug_info.get('after_loading_max', 'N/A')}")
-                    st.write(f"   - Exactly 1.0: {debug_info.get('after_loading_ones', 'N/A')}")
-                    st.write(f"   - Sample unique values: {debug_info.get('after_loading_sample', [])[:10]}")
-                
-                # 2. Check after filtering
-                st.write("\n**2. After applying filters (df_filtered):**")
-                st.write(f"   - Max value: {max_before}")
-                st.write(f"   - Exactly 1.0: {ones_before:,}")
-                st.write(f"   - Total rows: {len(df_filtered):,}")
-                st.write(f"   - Sample unique values: {sorted(prob_check.unique())[-10:]}")
-                
-                # 3. Check original source
-                st.write("\n**3. Checking source parquet file directly:**")
-                try:
-                    from pathlib import Path
-                    source_file = Path("data/parquet_export/donors_with_network_features.parquet")
-                    if source_file.exists():
-                        source_df = pd.read_parquet(source_file, engine='pyarrow')
-                        if 'Legacy_Intent_Probability' in source_df.columns:
-                            source_max = source_df['Legacy_Intent_Probability'].max()
-                            source_ones = (source_df['Legacy_Intent_Probability'] == 1.0).sum()
-                            st.write(f"   - Source file max: {source_max}")
-                            st.write(f"   - Source file exactly 1.0: {source_ones:,}")
-                            st.write(f"   - Source file sample values: {sorted(source_df['Legacy_Intent_Probability'].unique())[-10:]}")
-                            
-                            if source_ones == 0 and ones_before > 0:
-                                st.error("🚨 **CRITICAL FINDING**: Source file has NO 1.0s, but filtered DataFrame has 1.0s!")
-                                st.write("This means 1.0s are being created during data processing or filtering.")
-                                
-                                # Try to identify which rows got 1.0s
-                                if len(df_filtered) > 0:
-                                    st.write("\n**Checking if column mapping is correct:**")
-                                    if 'predicted_prob' in df_filtered.columns:
-                                        # Check if actual_gave was mistakenly used
-                                        if 'actual_gave' in df_filtered.columns:
-                                            prob_gave_match = (df_filtered['predicted_prob'] == df_filtered['actual_gave']).sum()
-                                            st.write(f"   - Values where predicted_prob == actual_gave: {prob_gave_match:,}")
-                                            if prob_gave_match > len(df_filtered) * 0.9:
-                                                st.error("🚨 **FOUND IT**: predicted_prob appears to match actual_gave! Wrong column is being used!")
-                        else:
-                            st.warning("   - Legacy_Intent_Probability not found in source file")
-                    else:
-                        st.warning(f"   - Source file not found: {source_file}")
-                except Exception as e:
-                    st.write(f"   - Error checking source: {e}")
-                
-                # 4. Show sample records with 1.0
-                if ones_before > 0:
-                    st.write("\n**4. Sample records with prob=1.0 in filtered DataFrame:**")
-                    ones_df = df_filtered[prob_check == 1.0].head(10)
-                    if len(ones_df) > 0:
-                        display_debug_cols = ['donor_id', 'predicted_prob']
-                        if 'actual_gave' in ones_df.columns:
-                            display_debug_cols.append('actual_gave')
-                        if 'Legacy_Intent_Binary' in ones_df.columns:
-                            display_debug_cols.append('Legacy_Intent_Binary')
-                        st.dataframe(ones_df[display_debug_cols].head(10), width='stretch', hide_index=True)
-                        
-                        # Check if these match actual_gave
-                        if 'actual_gave' in ones_df.columns:
-                            match_count = (ones_df['predicted_prob'] == ones_df['actual_gave']).sum()
-                            st.write(f"**Of these {len(ones_df)} samples, {match_count} have predicted_prob == actual_gave**")
-                            if match_count > len(ones_df) * 0.8:
-                                st.error("🚨 **ROOT CAUSE IDENTIFIED**: predicted_prob values match actual_gave!")
-                                st.write("This indicates the wrong column is being mapped to predicted_prob.")
-        
         # Top 10 prospects
         top_prospects = df_filtered.nlargest(10, 'predicted_prob')
-        
-        # DEBUG: Check what top 10 actually has
-        if len(top_prospects) > 0:
-            top_probs_debug = top_prospects['predicted_prob'].values
-            if (top_probs_debug == 1.0).any():
-                st.error(f"🚨 **DEBUG AFTER TOP 10**: Top 10 contains {((top_probs_debug == 1.0).sum())} values exactly = 1.0")
-                st.write("**Top 10 probability values:**", list(top_probs_debug))
         
         if len(top_prospects) > 0 and 'donor_id' in top_prospects.columns:
             col1, col2 = st.columns([2, 1])
@@ -2116,48 +2075,6 @@ def page_dashboard(df, regions, donor_types, segments, prob_threshold):
                     elif exact_ones > 0:
                         st.warning(f"⚠️ **Warning**: {exact_ones} donor(s) with exactly 100% probability. This is unusual for ML models.")
                 
-                if exact_ones > 0 or near_ones > 0:
-                    st.warning(f"⚠️ **Caution**: {exact_ones} donor(s) with exactly 100% probability, {near_ones} with ≥99% probability. This is unusual and may indicate:")
-                    st.warning("""
-                    - **Data leakage**: The model may be using target information in predictions
-                    - **Overfitting**: The model may be too confident on training patterns
-                    - **Clipping**: Probabilities may be artificially capped at 1.0
-                    
-                    **Recommendation**: Review model training and feature selection to ensure no target leakage.
-                    """ + accuracy_info)
-                
-                # Show raw probability values in an expander for transparency
-                with st.expander("🔍 View Raw Probability Values (for diagnostics)"):
-                    diag_data = {
-                        'Donor ID': top_prospects['donor_id'].values,
-                        'Raw Probability': raw_probs,
-                        'Formatted': [f"{p:.4f} ({p:.2%})" for p in raw_probs]
-                    }
-                    if 'actual_gave' in top_prospects.columns:
-                        diag_data['Actual Gave'] = top_prospects['actual_gave'].values
-                        diag_data['Match?'] = [(raw_probs[i] >= 0.5) == (top_prospects['actual_gave'].values[i] == 1) 
-                                               for i in range(len(raw_probs))]
-                    diag_df = pd.DataFrame(diag_data)
-                    st.dataframe(diag_df, width='stretch', hide_index=True)
-                    
-                    # Additional statistics
-                    st.markdown("---")
-                    st.markdown("#### 📊 Probability Distribution Statistics")
-                    stats_text = f"""
-                    - **Min**: {raw_probs.min():.4f}
-                    - **Max**: {raw_probs.max():.4f}
-                    - **Mean**: {raw_probs.mean():.4f}
-                    - **Unique values**: {len(np.unique(raw_probs))}
-                    - **Exactly 1.0**: {exact_ones} ({exact_ones/len(raw_probs)*100:.0f}%)
-                    """
-                    
-                    if 'actual_gave' in top_prospects.columns:
-                        actual_outcomes = top_prospects['actual_gave'].values
-                        false_pos_rate = ((raw_probs >= 0.5) & (actual_outcomes == 0)).sum() / len(raw_probs) * 100
-                        stats_text += f"\n- **False Positive Rate**: {false_pos_rate:.1f}%"
-                    
-                    st.markdown(stats_text)
-                    st.caption("💡 **Interpretation**: Probabilities should typically range from 0.3 to 0.9. Values ≥0.95 may indicate model overconfidence. **All values exactly 1.0 suggests clipping or a model bug.**")
                 
                 # Format probability for display (show 2 decimal places for better precision)
                 top_display['Probability'] = top_display['Probability'].apply(lambda x: f"{x:.2%}")
@@ -2278,7 +2195,21 @@ def page_dashboard(df, regions, donor_types, segments, prob_threshold):
         """)
     
     with col3:
-        potential_value = df_filtered[df_filtered['predicted_prob'] >= prob_threshold]['total_giving'].sum()
+        # Robust calculation: guard missing columns and ensure 1-D Series inputs
+        potential_value = 0.0
+        if ('predicted_prob' in df_filtered.columns) and (df_filtered.columns.tolist().count('total_giving') >= 1):
+            prob_s = pd.to_numeric(df_filtered['predicted_prob'], errors='coerce')
+            mask = prob_s >= float(prob_threshold)
+            # Handle potential duplicate 'total_giving' columns gracefully
+            tg_cols = [c for c in df_filtered.columns if c == 'total_giving']
+            tg_obj = df_filtered[tg_cols]
+            if isinstance(tg_obj, pd.DataFrame):
+                # Use the first column to avoid 2D errors
+                tg_series = pd.to_numeric(tg_obj.iloc[:, 0], errors='coerce')
+            else:
+                tg_series = pd.to_numeric(df_filtered['total_giving'], errors='coerce')
+            tg_filtered = tg_series[mask] if tg_series.shape[0] == mask.shape[0] else tg_series
+            potential_value = float(tg_filtered.fillna(0).sum()) if tg_filtered is not None else 0.0
         # Human-friendly units: use B if >= $1B, else M, with proper commas
         if potential_value >= 1_000_000_000:
             display_value = f"${potential_value/1_000_000_000:.1f}B"
@@ -3453,16 +3384,30 @@ def page_business_impact(df, prob_threshold):
     saved_meta = _try_load_saved_metrics() or {}
     threshold = saved_meta.get('optimal_threshold', prob_threshold)
     
+    # CRITICAL: Use Will_Give_Again_Probability directly if available (from generate_will_give_again_predictions.py)
+    # Fall back to predicted_prob if Will_Give_Again_Probability doesn't exist
+    prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
+    
     # Calculate actual dollars at stake
-    if 'predicted_prob' in df.columns and 'actual_gave' in df.columns and 'total_giving' in df.columns and 'avg_gift' in df.columns:
+    if prob_col in df.columns and 'actual_gave' in df.columns and 'total_giving' in df.columns and 'avg_gift' in df.columns:
         # High probability prospects
-        high_prob_donors = df[df['predicted_prob'] >= threshold].copy()
+        high_prob_donors = df[df[prob_col] >= threshold].copy()
         high_prob_count = len(high_prob_donors)
         
         # Calculate expected conversions
         if 'actual_gave' in df.columns:
             # Baseline conversion (actual rate)
             baseline_rate = df['actual_gave'].mean() if 'actual_gave' in df.columns else 0.17
+            # Handle NaN or None
+            if pd.isna(baseline_rate) or baseline_rate is None:
+                baseline_rate = 0.17
+            # Ensure baseline_rate is reasonable (between 0 and 1)
+            if baseline_rate <= 0:
+                st.warning(f"⚠️ Baseline conversion rate is 0 or negative ({baseline_rate:.2%}). Using default 17%.")
+                baseline_rate = 0.17
+            elif baseline_rate > 1:
+                st.warning(f"⚠️ Baseline conversion rate is >100% ({baseline_rate:.2%}). Using default 17%.")
+                baseline_rate = 0.17
             
             # Fusion model conversion (for high probability group) - use actual data
             high_prob_rate = high_prob_donors['actual_gave'].mean() if len(high_prob_donors) > 0 and 'actual_gave' in high_prob_donors.columns else None
@@ -3471,7 +3416,29 @@ def page_business_impact(df, prob_threshold):
                 high_prob_rate = baseline_rate
             
             # Average gift amount
-            avg_gift_amount = df['avg_gift'].mean() if 'avg_gift' in df.columns else 500
+            # CRITICAL: avg_gift_amount column may be corrupted (mean $0.03), use Last_Gift instead
+            last_gift_col = None
+            for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
+                if col in df.columns:
+                    last_gift_col = col
+                    break
+            
+            if last_gift_col:
+                gift_amounts = pd.to_numeric(df[last_gift_col], errors='coerce').fillna(0).clip(lower=0)
+                # Use median for robustness against outliers
+                avg_gift_amount = gift_amounts.median() if len(gift_amounts) > 0 and gift_amounts.median() > 0 else (gift_amounts.mean() if len(gift_amounts) > 0 and gift_amounts.mean() > 0 else 500)
+            else:
+                # Fallback to avg_gift if Last_Gift not available
+                avg_gift_values = pd.to_numeric(df['avg_gift'], errors='coerce').fillna(0).clip(lower=0) if 'avg_gift' in df.columns else pd.Series([500])
+                avg_gift_amount = avg_gift_values.median() if len(avg_gift_values) > 0 and avg_gift_values.median() > 0 else (avg_gift_values.mean() if len(avg_gift_values) > 0 and avg_gift_values.mean() > 0 else 500)
+            
+            # Debug: Show what we're using
+            if avg_gift_amount <= 0 or avg_gift_amount < 1:
+                st.warning(f"⚠️ Average gift amount appears low ({avg_gift_amount:.2f}). Using fallback value of $500.")
+                avg_gift_amount = 500
+            
+            # Store last_gift_col for debug section
+            _last_gift_col_used = last_gift_col
             
             # Cost assumptions
             cost_per_contact = st.sidebar.number_input("Cost per Contact ($)", 0.5, 10.0, 2.0, 0.5, help="Average cost per outreach")
@@ -3479,7 +3446,7 @@ def page_business_impact(df, prob_threshold):
             # Scenario: Contact top X% of donors
             contact_percentage = st.slider("Contact Top % of Donors", 1, 100, 20, 1)
             num_to_contact = int(len(df) * contact_percentage / 100)
-            top_donors = df.nlargest(num_to_contact, 'predicted_prob')
+            top_donors = df.nlargest(num_to_contact, prob_col)
             
             # Baseline scenario
             baseline_contacts = num_to_contact
@@ -3492,13 +3459,49 @@ def page_business_impact(df, prob_threshold):
             fusion_contacts = num_to_contact
             if len(top_donors) > 0 and 'actual_gave' in top_donors.columns:
                 fusion_response_rate = top_donors['actual_gave'].mean()
+                # Handle NaN or None
+                if pd.isna(fusion_response_rate) or fusion_response_rate is None:
+                    fusion_response_rate = baseline_rate
             else:
                 st.warning("⚠️ Actual response rate for top predicted donors not available. Using baseline rate.")
                 fusion_response_rate = baseline_rate
+            
+            # Ensure response rate is valid
+            if pd.isna(fusion_response_rate) or fusion_response_rate is None:
+                fusion_response_rate = baseline_rate if not pd.isna(baseline_rate) else 0.17
+            
             fusion_responses = int(fusion_contacts * fusion_response_rate)
             fusion_revenue = fusion_responses * avg_gift_amount
             fusion_cost = fusion_contacts * cost_per_contact
             fusion_roi = ((fusion_revenue - fusion_cost) / fusion_cost * 100) if fusion_cost > 0 else 0
+            
+            # Debug information (only show if values are suspicious)
+            if baseline_revenue == 0 or fusion_revenue == 0:
+                with st.expander("🔍 Debug Information (Click to see why metrics are 0)"):
+                    st.write(f"**Data Check:**")
+                    st.write(f"- Donors in dataset: {len(df):,}")
+                    st.write(f"- Number to contact: {num_to_contact:,}")
+                    st.write(f"- Average gift amount: ${avg_gift_amount:,.2f}")
+                    st.write(f"- Baseline rate: {baseline_rate:.2%}")
+                    st.write(f"- Fusion response rate: {fusion_response_rate:.2%}")
+                    st.write(f"- Baseline responses: {baseline_responses:,}")
+                    st.write(f"- Fusion responses: {fusion_responses:,}")
+                    st.write(f"- Baseline revenue: ${baseline_revenue:,.2f}")
+                    st.write(f"- Fusion revenue: ${fusion_revenue:,.2f}")
+                    
+                    # Check for missing columns
+                    missing_cols = []
+                    if prob_col not in df.columns:
+                        missing_cols.append(prob_col)
+                    if 'actual_gave' not in df.columns:
+                        missing_cols.append('actual_gave')
+                    if 'avg_gift' not in df.columns and _last_gift_col_used is None:
+                        missing_cols.append('avg_gift or Last_Gift')
+                    
+                    if missing_cols:
+                        st.error(f"❌ Missing required columns: {', '.join(missing_cols)}")
+                    else:
+                        st.info("✅ All required columns present. Check values above for zeros or NaN.")
             
             # Improvement
             revenue_gain = fusion_revenue - baseline_revenue
@@ -3509,44 +3512,265 @@ def page_business_impact(df, prob_threshold):
             
             with col1:
                 st.markdown(f"""
-                <div class="metric-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white;">
-                    <div class="metric-label" style="color: white;">Revenue (Baseline)</div>
+                <div class="metric-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">Revenue (Baseline)</div>
                     <div class="metric-value" style="color: white;">${baseline_revenue:,.0f}</div>
-                    <div class="metric-label" style="color: white; font-size: 11px;">{baseline_responses:,} responses</div>
+                    <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">{baseline_responses:,} responses</div>
                 </div>
                 """, unsafe_allow_html=True)
             
             with col2:
                 st.markdown(f"""
-                <div class="metric-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white;">
-                    <div class="metric-label" style="color: white;">Revenue (Fusion)</div>
+                <div class="metric-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">Revenue (Fusion)</div>
                     <div class="metric-value" style="color: white;">${fusion_revenue:,.0f}</div>
-                    <div class="metric-label" style="color: white; font-size: 11px;">{fusion_responses:,} responses</div>
+                    <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">{fusion_responses:,} responses</div>
                 </div>
                 """, unsafe_allow_html=True)
             
             with col3:
                 st.markdown(f"""
-                <div class="metric-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white;">
-                    <div class="metric-label" style="color: white;">Revenue Gain</div>
+                <div class="metric-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">Revenue Gain</div>
                     <div class="metric-value" style="color: white;">${revenue_gain:,.0f}</div>
-                    <div class="metric-label" style="color: white; font-size: 11px;">+{(fusion_response_rate/baseline_rate - 1)*100:.0f}% response rate</div>
+                    <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">+{(fusion_response_rate/baseline_rate - 1)*100:.0f}% response rate</div>
                 </div>
                 """, unsafe_allow_html=True)
             
             with col4:
+                # Format ROI improvement with comma if 1000 or higher
+                roi_display = f"+{roi_improvement:,.0f}%" if abs(roi_improvement) >= 1000 else f"+{roi_improvement:.0f}%"
                 st.markdown(f"""
-                <div class="metric-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white;">
-                    <div class="metric-label" style="color: white;">ROI Improvement</div>
-                    <div class="metric-value" style="color: white;">+{roi_improvement:.0f}%</div>
-                    <div class="metric-label" style="color: white; font-size: 11px;">vs Baseline</div>
+                <div class="metric-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
+                    <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">ROI Improvement</div>
+                    <div class="metric-value" style="color: white;">{roi_display}</div>
+                    <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">vs Baseline</div>
                 </div>
                 """, unsafe_allow_html=True)
             
             st.markdown("<br>", unsafe_allow_html=True)
             
+            # Verification Section
+            with st.expander("✅ Verification & Calculation Details", expanded=False):
+                st.markdown("### 🔍 How to Verify These Calculations")
+                st.markdown("""
+                Use this section to manually verify the hero metrics and before/after chart values.
+                All calculations use the following formulas:
+                """)
+                
+                verification_data = {
+                    'Input/Calculation': [
+                        '**INPUTS**',
+                        'Total donors in dataset',
+                        'Contact percentage (slider)',
+                        'Number of donors to contact',
+                        'Cost per contact ($)',
+                        'Average gift amount ($)',
+                        'Baseline conversion rate',
+                        'Fusion response rate (top predicted donors)',
+                        '',
+                        '**BASELINE CALCULATIONS**',
+                        'Baseline contacts',
+                        'Baseline responses',
+                        'Baseline revenue',
+                        'Baseline cost',
+                        'Baseline ROI',
+                        '',
+                        '**FUSION CALCULATIONS**',
+                        'Fusion contacts',
+                        'Fusion responses',
+                        'Fusion revenue',
+                        'Fusion cost',
+                        'Fusion ROI',
+                        '',
+                        '**HERO METRICS**',
+                        'Revenue (Baseline)',
+                        'Revenue (Fusion)',
+                        'Revenue Gain',
+                        'ROI Improvement',
+                    ],
+                    'Value': [
+                        '',
+                        f"{len(df):,}",
+                        f"{contact_percentage}%",
+                        f"{num_to_contact:,}",
+                        f"${cost_per_contact:.2f}",
+                        f"${avg_gift_amount:,.2f}",
+                        f"{baseline_rate:.4%}",
+                        f"{fusion_response_rate:.4%}",
+                        '',
+                        '',
+                        f"{baseline_contacts:,}",
+                        f"{baseline_responses:,}",
+                        f"${baseline_revenue:,.2f}",
+                        f"${baseline_cost:,.2f}",
+                        f"{baseline_roi:.2f}%",
+                        '',
+                        '',
+                        f"{fusion_contacts:,}",
+                        f"{fusion_responses:,}",
+                        f"${fusion_revenue:,.2f}",
+                        f"${fusion_cost:,.2f}",
+                        f"{fusion_roi:.2f}%",
+                        '',
+                        '',
+                        f"${baseline_revenue:,.0f}",
+                        f"${fusion_revenue:,.0f}",
+                        f"${revenue_gain:,.0f}",
+                        f"+{roi_improvement:.0f}%",
+                    ],
+                    'Formula': [
+                        '',
+                        'Count of rows in dataframe',
+                        'User-selected slider value',
+                        'len(df) × contact_percentage / 100',
+                        'User-selected sidebar input',
+                        'Median of Last_Gift column (or avg_gift fallback)',
+                        'Mean of actual_gave column (all donors)',
+                        'Mean of actual_gave for top predicted donors',
+                        '',
+                        '',
+                        'num_to_contact',
+                        'int(baseline_contacts × baseline_rate)',
+                        'baseline_responses × avg_gift_amount',
+                        'baseline_contacts × cost_per_contact',
+                        '((baseline_revenue - baseline_cost) / baseline_cost) × 100',
+                        '',
+                        '',
+                        'num_to_contact',
+                        'int(fusion_contacts × fusion_response_rate)',
+                        'fusion_responses × avg_gift_amount',
+                        'fusion_contacts × cost_per_contact',
+                        '((fusion_revenue - fusion_cost) / fusion_cost) × 100',
+                        '',
+                        '',
+                        'baseline_revenue (rounded)',
+                        'fusion_revenue (rounded)',
+                        'fusion_revenue - baseline_revenue',
+                        'fusion_roi - baseline_roi',
+                    ]
+                }
+                
+                verification_df = pd.DataFrame(verification_data)
+                st.dataframe(verification_df, width='stretch', hide_index=True)
+                
+                st.markdown("---")
+                st.markdown("### 📝 Manual Verification Steps")
+                
+                col1, col2 = st.columns(2)
+                
+                with col1:
+                    st.markdown("""
+                    **1. Verify Baseline Revenue:**
+                    - Baseline contacts: {:,}
+                    - Baseline rate: {:.2%}
+                    - Baseline responses: {:,} × {:.2%} = {:,}
+                    - Revenue: {:,} × ${:.2f} = **${:,.2f}**
+                    """.format(
+                        baseline_contacts,
+                        baseline_rate,
+                        baseline_contacts,
+                        baseline_rate,
+                        baseline_responses,
+                        baseline_responses,
+                        avg_gift_amount,
+                        baseline_revenue
+                    ))
+                    
+                    st.markdown("""
+                    **2. Verify Fusion Revenue:**
+                    - Fusion contacts: {:,}
+                    - Fusion rate: {:.2%}
+                    - Fusion responses: {:,} × {:.2%} = {:,}
+                    - Revenue: {:,} × ${:.2f} = **${:,.2f}**
+                    """.format(
+                        fusion_contacts,
+                        fusion_response_rate,
+                        fusion_contacts,
+                        fusion_response_rate,
+                        fusion_responses,
+                        fusion_responses,
+                        avg_gift_amount,
+                        fusion_revenue
+                    ))
+                
+                with col2:
+                    st.markdown("""
+                    **3. Verify Revenue Gain:**
+                    - Fusion revenue: ${:,.2f}
+                    - Baseline revenue: ${:,.2f}
+                    - Gain: ${:,.2f} - ${:,.2f} = **${:,.2f}**
+                    """.format(
+                        fusion_revenue,
+                        baseline_revenue,
+                        fusion_revenue,
+                        baseline_revenue,
+                        revenue_gain
+                    ))
+                    
+                    st.markdown("""
+                    **4. Verify ROI Improvement:**
+                    - Fusion ROI: {:.2f}%
+                    - Baseline ROI: {:.2f}%
+                    - Improvement: {:.2f}% - {:.2f}% = **{:.2f}%**
+                    """.format(
+                        fusion_roi,
+                        baseline_roi,
+                        fusion_roi,
+                        baseline_roi,
+                        roi_improvement
+                    ))
+                
+                st.markdown("---")
+                st.markdown("### 📊 Data Source Verification")
+                
+                data_source_info = {
+                    'Data Source': [
+                        'Probability Column',
+                        'Outcome Column',
+                        'Gift Amount Column',
+                        'Top Donors Selection',
+                    ],
+                    'Value': [
+                        prob_col,
+                        'actual_gave',
+                        _last_gift_col_used if _last_gift_col_used else ('avg_gift (fallback)' if 'avg_gift' in df.columns else 'N/A'),
+                        f'Top {num_to_contact:,} by {prob_col}',
+                    ],
+                    'Sample Values': [
+                        f"Range: {df[prob_col].min():.3f} - {df[prob_col].max():.3f}",
+                        f"Mean: {df['actual_gave'].mean():.4f}, Sum: {df['actual_gave'].sum():,}",
+                        f"Median: ${pd.to_numeric(df[_last_gift_col_used if _last_gift_col_used else ('avg_gift' if 'avg_gift' in df.columns else None)], errors='coerce').median():,.2f}" if (_last_gift_col_used or 'avg_gift' in df.columns) else "N/A",
+                        f"Min prob in top: {top_donors[prob_col].min():.3f}, Max: {top_donors[prob_col].max():.3f}",
+                    ]
+                }
+                
+                source_df = pd.DataFrame(data_source_info)
+                st.dataframe(source_df, width='stretch', hide_index=True)
+                
+                # Export button for verification data
+                if st.button("📥 Download Verification Data (CSV)"):
+                    export_data = {
+                        'metric': verification_data['Input/Calculation'],
+                        'value': verification_data['Value'],
+                        'formula': verification_data['Formula']
+                    }
+                    export_df = pd.DataFrame(export_data)
+                    csv = export_df.to_csv(index=False)
+                    st.download_button(
+                        label="Download CSV",
+                        data=csv,
+                        file_name=f"business_impact_verification_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                        mime="text/csv"
+                    )
+            
             # Before/After Comparison
             st.markdown("### 📊 Before & After: Targeted Outreach Impact")
+            
+            # Format ROI percentages with commas if 1000 or higher
+            baseline_roi_display = f"{baseline_roi:,.0f}%" if abs(baseline_roi) >= 1000 else f"{baseline_roi:.0f}%"
+            fusion_roi_display = f"{fusion_roi:,.0f}%" if abs(fusion_roi) >= 1000 else f"{fusion_roi:.0f}%"
+            roi_improvement_display = f"+{roi_improvement:,.0f}%" if abs(roi_improvement) >= 1000 else f"+{roi_improvement:.0f}%"
             
             comparison_data = {
                 'Metric': [
@@ -3565,7 +3789,7 @@ def page_business_impact(df, prob_threshold):
                     f"${baseline_revenue:,.0f}",
                     f"${baseline_cost:,.0f}",
                     f"${baseline_revenue - baseline_cost:,.0f}",
-                    f"{baseline_roi:.0f}%"
+                    baseline_roi_display
                 ],
                 'Fusion Model (New Way)': [
                     f"{fusion_contacts:,}",
@@ -3574,7 +3798,7 @@ def page_business_impact(df, prob_threshold):
                     f"${fusion_revenue:,.0f}",
                     f"${fusion_cost:,.0f}",
                     f"${fusion_revenue - fusion_cost:,.0f}",
-                    f"{fusion_roi:.0f}%"
+                    fusion_roi_display
                 ],
                 'Improvement': [
                     "Same effort",
@@ -3583,12 +3807,12 @@ def page_business_impact(df, prob_threshold):
                     f"+${revenue_gain:,.0f}",
                     "Same cost",
                     f"+${(fusion_revenue - fusion_cost) - (baseline_revenue - baseline_cost):,.0f}",
-                    f"+{roi_improvement:.0f}%"
+                    roi_improvement_display
                 ]
             }
             
             comparison_df = pd.DataFrame(comparison_data)
-            st.dataframe(comparison_df, width='stretch', hide_index=True)
+            st.dataframe(comparison_df, width='stretch', hide_index=True, use_container_width=True)
             
             # Visualization
             st.markdown("### 📈 Revenue Comparison")
@@ -3604,88 +3828,210 @@ def page_business_impact(df, prob_threshold):
                     text=[f"${baseline_revenue:,.0f}", f"${fusion_revenue:,.0f}"],
                     textposition='outside'
                 ))
+                # Adjust y-axis to leave room for labels above bars
+                max_revenue = max(baseline_revenue, fusion_revenue)
                 fig_revenue.update_layout(
                     title='Total Revenue: Baseline vs Fusion',
                     yaxis_title='Revenue ($)',
+                    yaxis=dict(range=[0, max_revenue * 1.2]),  # Add 20% padding at top
                     height=400,
                     showlegend=False
                 )
                 _plotly_chart_silent(fig_revenue, width='stretch')
             
             with col2:
+                # Format ROI percentages with commas if 1000 or higher
+                baseline_roi_text = f"{baseline_roi:,.0f}%" if abs(baseline_roi) >= 1000 else f"{baseline_roi:.0f}%"
+                fusion_roi_text = f"{fusion_roi:,.0f}%" if abs(fusion_roi) >= 1000 else f"{fusion_roi:.0f}%"
+                
                 fig_roi = go.Figure()
                 fig_roi.add_trace(go.Bar(
                     name='ROI',
                     x=['Baseline', 'Fusion'],
                     y=[baseline_roi, fusion_roi],
                     marker_color=['#e74c3c', '#2ecc71'],
-                    text=[f"{baseline_roi:.0f}%", f"{fusion_roi:.0f}%"],
+                    text=[baseline_roi_text, fusion_roi_text],
                     textposition='outside'
                 ))
+                # Adjust y-axis to leave room for labels above bars
+                max_roi = max(baseline_roi, fusion_roi)
+                # Ensure minimum range even if ROI is negative
+                yaxis_min = min(0, min(baseline_roi, fusion_roi) * 1.1) if min(baseline_roi, fusion_roi) < 0 else 0
                 fig_roi.update_layout(
                     title='ROI Comparison: Baseline vs Fusion',
                     yaxis_title='ROI (%)',
+                    yaxis=dict(range=[yaxis_min, max_roi * 1.2]),  # Add 20% padding at top
                     height=400,
                     showlegend=False
                 )
                 _plotly_chart_silent(fig_roi, width='stretch')
             
+            # Chart explanation below the charts
+            st.markdown(f"""
+            <div style="background-color: #000000; padding: 15px; border-radius: 8px; margin-top: 20px; border-left: 4px solid #667eea;">
+                <p style="margin: 0; font-size: 14px; color: #ffffff;">
+                    <strong>📊 Chart Explanation:</strong> These charts compare the Baseline and Fusion model scenarios based on contacting 
+                    the top <strong>{contact_percentage}%</strong> of donors (as selected in the slider above). The revenue and ROI calculations 
+                    reflect the expected outcomes when using the multi-modal fusion model versus random outreach for the same number of contacts.
+                </p>
+            </div>
+            """, unsafe_allow_html=True)
+            
             # Segmented Opportunities - Categorized
             st.markdown("### 🎯 Targeted Opportunities by Category")
             
             if 'segment' in df.columns:
+                # Fix duplicate index issue by resetting index first
+                # Create a working copy with reset index to avoid duplicate label issues
+                df_work = df.reset_index(drop=True).copy()
+                
+                # Ensure all columns are accessible and convert to arrays for safe boolean operations
+                # This avoids any index alignment issues during boolean mask creation
+                # Handle duplicate column names by taking first column if DataFrame is returned
+                try:
+                    if prob_col in df_work.columns:
+                        prob_col_data = df_work[prob_col]
+                        # If DataFrame (duplicate columns), take first column; otherwise it's a Series
+                        if isinstance(prob_col_data, pd.DataFrame):
+                            prob_series = prob_col_data.iloc[:, 0]
+                        else:
+                            prob_series = prob_col_data
+                        prob_values = pd.to_numeric(prob_series, errors='coerce').fillna(0).values
+                    else:
+                        prob_values = np.zeros(len(df_work))
+                except Exception:
+                    prob_values = np.zeros(len(df_work))
+                
+                try:
+                    if 'segment' in df_work.columns:
+                        segment_data = df_work['segment']
+                        if isinstance(segment_data, pd.DataFrame):
+                            segment_series = segment_data.iloc[:, 0]
+                        else:
+                            segment_series = segment_data
+                        segment_values = segment_series.values if isinstance(segment_series, pd.Series) else np.array(segment_series).flatten()
+                    else:
+                        segment_values = None
+                except Exception:
+                    segment_values = None
+                
+                try:
+                    if 'total_giving' in df_work.columns:
+                        total_giving_data = df_work['total_giving']
+                        # If DataFrame (duplicate columns), take first column; otherwise it's a Series
+                        if isinstance(total_giving_data, pd.DataFrame):
+                            total_giving_series = total_giving_data.iloc[:, 0]
+                        else:
+                            total_giving_series = total_giving_data
+                        total_giving_values = pd.to_numeric(total_giving_series, errors='coerce').fillna(0).values
+                    else:
+                        total_giving_values = None
+                except Exception:
+                    total_giving_values = None
+                
+                # Compute quantile separately to avoid alignment issues
+                try:
+                    if 'total_giving' in df_work.columns:
+                        total_giving_col = df_work['total_giving']
+                        # Handle duplicate column names
+                        if isinstance(total_giving_col, pd.DataFrame):
+                            total_giving_series = total_giving_col.iloc[:, 0]
+                        else:
+                            total_giving_series = total_giving_col
+                        total_giving_75th = total_giving_series.quantile(0.75)
+                    else:
+                        total_giving_75th = 0
+                except Exception:
+                    total_giving_75th = 0
+                
                 # Quick Wins: High prob recent donors
-                quick_wins_df = df[
-                    (df['predicted_prob'] >= 0.7) & 
-                    (df['segment'] == 'Recent (0-6mo)')
-                ]
+                if segment_values is not None:
+                    quick_wins_mask = (prob_values >= 0.7) & (segment_values == 'Recent (0-6mo)')
+                    quick_wins_df = df_work.loc[quick_wins_mask].copy()
+                else:
+                    quick_wins_df = pd.DataFrame()
                 
                 # Cultivation: Medium prob, high value
-                cultivation_df = df[
-                    (df['predicted_prob'] >= 0.4) & 
-                    (df['predicted_prob'] < 0.7) &
-                    (df['total_giving'] >= df['total_giving'].quantile(0.75))
-                ]
+                if total_giving_values is not None:
+                    cultivation_mask = (
+                        (prob_values >= 0.4) & 
+                        (prob_values < 0.7) &
+                        (total_giving_values >= total_giving_75th)
+                    )
+                    cultivation_df = df_work.loc[cultivation_mask].copy()
+                else:
+                    cultivation_df = pd.DataFrame()
                 
                 # Re-engagement: Lapsed but high prob
-                reeng_df = df[
-                    (df['predicted_prob'] >= 0.6) & 
-                    (df['segment'].isin(['Lapsed (1-2yr)', 'Very Lapsed (2yr+)']))
-                ]
+                if segment_values is not None:
+                    reeng_mask = (
+                        (prob_values >= 0.6) & 
+                        (np.isin(segment_values, ['Lapsed (1-2yr)', 'Very Lapsed (2yr+)']))
+                    )
+                    reeng_df = df_work.loc[reeng_mask].copy()
+                else:
+                    reeng_df = pd.DataFrame()
                 
                 categories_data = []
                 
+                # Helper function to get gift amounts (use Last_Gift like in hero metrics section)
+                def get_gift_amounts(df_subset):
+                    """Get gift amounts from Last_Gift column, fallback to avg_gift, then to default"""
+                    last_gift_col = None
+                    for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
+                        if col in df_subset.columns:
+                            last_gift_col = col
+                            break
+                    
+                    if last_gift_col:
+                        gift_amounts = pd.to_numeric(df_subset[last_gift_col], errors='coerce').fillna(0).clip(lower=0)
+                        return gift_amounts
+                    elif 'avg_gift' in df_subset.columns:
+                        gift_amounts = pd.to_numeric(df_subset['avg_gift'], errors='coerce').fillna(0).clip(lower=0)
+                        return gift_amounts
+                    else:
+                        return pd.Series([500] * len(df_subset))  # Default fallback
+                
                 if len(quick_wins_df) > 0:
-                    qw_revenue = quick_wins_df['avg_gift'].sum() * fusion_response_rate if 'avg_gift' in quick_wins_df.columns else 0
+                    qw_gift_amounts = get_gift_amounts(quick_wins_df)
+                    qw_avg_gift = qw_gift_amounts.median() if len(qw_gift_amounts) > 0 and qw_gift_amounts.median() > 0 else (qw_gift_amounts.mean() if len(qw_gift_amounts) > 0 and qw_gift_amounts.mean() > 0 else 500)
+                    # Revenue = Count × Avg Gift × Response Rate (matches hero metrics formula)
+                    qw_revenue = len(quick_wins_df) * qw_avg_gift * fusion_response_rate
                     categories_data.append({
                         'Category': '🎯 Quick Wins',
                         'Count': len(quick_wins_df),
-                        'Avg Probability': quick_wins_df['predicted_prob'].mean(),
-                        'Avg Gift': quick_wins_df['avg_gift'].mean() if 'avg_gift' in quick_wins_df.columns else 0,
+                        'Avg Probability': quick_wins_df[prob_col].mean(),
+                        'Avg Gift': qw_avg_gift,
                         'Estimated Revenue': qw_revenue,
                         'Priority': 1,
                         'Description': 'High prob (>70%) recent donors (0-6mo)'
                     })
                 
                 if len(cultivation_df) > 0:
-                    cult_revenue = cultivation_df['avg_gift'].sum() * fusion_response_rate if 'avg_gift' in cultivation_df.columns else 0
+                    cult_gift_amounts = get_gift_amounts(cultivation_df)
+                    cult_avg_gift = cult_gift_amounts.median() if len(cult_gift_amounts) > 0 and cult_gift_amounts.median() > 0 else (cult_gift_amounts.mean() if len(cult_gift_amounts) > 0 and cult_gift_amounts.mean() > 0 else 500)
+                    # Revenue = Count × Avg Gift × Response Rate (matches hero metrics formula)
+                    cult_revenue = len(cultivation_df) * cult_avg_gift * fusion_response_rate
                     categories_data.append({
                         'Category': '🌱 Cultivation Targets',
                         'Count': len(cultivation_df),
-                        'Avg Probability': cultivation_df['predicted_prob'].mean(),
-                        'Avg Gift': cultivation_df['avg_gift'].mean() if 'avg_gift' in cultivation_df.columns else 0,
+                        'Avg Probability': cultivation_df[prob_col].mean(),
+                        'Avg Gift': cult_avg_gift,
                         'Estimated Revenue': cult_revenue,
                         'Priority': 2,
                         'Description': 'Medium prob (40-70%), high lifetime value'
                     })
                 
                 if len(reeng_df) > 0:
-                    reeng_revenue = reeng_df['avg_gift'].sum() * fusion_response_rate if 'avg_gift' in reeng_df.columns else 0
+                    reeng_gift_amounts = get_gift_amounts(reeng_df)
+                    reeng_avg_gift = reeng_gift_amounts.median() if len(reeng_gift_amounts) > 0 and reeng_gift_amounts.median() > 0 else (reeng_gift_amounts.mean() if len(reeng_gift_amounts) > 0 and reeng_gift_amounts.mean() > 0 else 500)
+                    # Revenue = Count × Avg Gift × Response Rate (matches hero metrics formula)
+                    reeng_revenue = len(reeng_df) * reeng_avg_gift * fusion_response_rate
                     categories_data.append({
                         'Category': '🔄 Re-engagement',
                         'Count': len(reeng_df),
-                        'Avg Probability': reeng_df['predicted_prob'].mean(),
-                        'Avg Gift': reeng_df['avg_gift'].mean() if 'avg_gift' in reeng_df.columns else 0,
+                        'Avg Probability': reeng_df[prob_col].mean(),
+                        'Avg Gift': reeng_avg_gift,
                         'Estimated Revenue': reeng_revenue,
                         'Priority': 3,
                         'Description': 'Lapsed (>1yr) but high prob (>60%)'
@@ -3705,6 +4051,7 @@ def page_business_impact(df, prob_threshold):
                     
                     # Visual comparison
                     fig_cat = go.Figure()
+                    max_revenue = categories_df['Estimated Revenue'].max()
                     fig_cat.add_trace(go.Bar(
                         x=categories_df['Category'],
                         y=categories_df['Estimated Revenue'],
@@ -3715,24 +4062,12 @@ def page_business_impact(df, prob_threshold):
                     fig_cat.update_layout(
                         title='Revenue Potential by Category',
                         yaxis_title='Estimated Revenue ($)',
+                        yaxis=dict(range=[0, max_revenue * 1.2]),  # Add 20% padding above max value for labels
                         height=400
                     )
                     _plotly_chart_silent(fig_cat, width='stretch')
-            
-            # Key Takeaways
-            st.markdown("### 💡 Key Takeaways")
-            st.success(f"""
-            **Campaign Impact Summary:**
-            
-            - **2x Response Rate**: Contacting {num_to_contact:,} donors using the Fusion model yields {fusion_responses:,} responses vs {baseline_responses:,} with baseline ({fusion_response_rate:.1%} vs {baseline_rate:.1%})
-            - **${revenue_gain:,.0f} Additional Revenue**: Same outreach effort, {revenue_gain:,.0f}% more revenue
-            - **{roi_improvement:.0f}% Better ROI**: From {baseline_roi:.0f}% to {fusion_roi:.0f}% return on investment
-            - **Cost Savings**: Better targeting reduces wasted outreach on non-donors
-            
-            **Bottom Line:** The Fusion model transforms the same campaign budget into significantly higher returns by focusing on the right donors.
-            """)
         else:
-            st.info("Business impact calculations require 'predicted_prob', 'actual_gave', and financial columns in the dataset.")
+            st.info(f"Business impact calculations require '{prob_col}', 'actual_gave', and financial columns in the dataset.")
     else:
         st.info("Business impact calculations require prediction and financial data.")
 
