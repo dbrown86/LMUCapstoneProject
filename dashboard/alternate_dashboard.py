@@ -1076,7 +1076,11 @@ def get_model_metrics(df=None):
 
 @st.cache_data
 def get_feature_importance(df):
-    """Calculate feature importance from actual data if available"""
+    """Calculate feature importance from actual data if available
+    
+    Uses correlation with the 'gave again in 2024' outcome as a proxy for feature importance.
+    This is based on the multi-modal fusion model dataset and outcome variable.
+    """
     
     # Check if we have actual feature importance in the data
     if 'feature_importance' in df.columns or 'shap_value' in df.columns:
@@ -1084,22 +1088,41 @@ def get_feature_importance(df):
         # This would need to be implemented based on your actual model output
         pass
     
-    # For now, calculate correlation with target as proxy for importance
-    if 'actual_gave' in df.columns:
+    # CRITICAL: Use Gave_Again_In_2024 if available (from will give again in 2024 prediction file)
+    # Otherwise fall back to actual_gave
+    outcome_col = 'Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else ('actual_gave' if 'actual_gave' in df.columns else None)
+    
+    if outcome_col:
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        # Remove target and ID columns
-        feature_cols = [c for c in numeric_cols if c not in ['actual_gave', 'donor_id']]
+        # Remove target, ID, and prediction columns (these are outputs, not features)
+        exclude_cols = [outcome_col, 'actual_gave', 'donor_id', 'Will_Give_Again_Probability', 
+                       'predicted_prob', 'Legacy_Intent_Probability']
+        feature_cols = [c for c in numeric_cols if c not in exclude_cols]
         
         importance_scores = []
         feature_names = []
         
+        # Convert outcome to numeric for correlation
+        outcome_series = pd.to_numeric(df[outcome_col], errors='coerce')
+        
         for col in feature_cols:
             try:
-                corr = abs(df[col].corr(df['actual_gave']))
-                if not np.isnan(corr):
-                    importance_scores.append(corr)
-                    feature_names.append(col)
-            except:
+                # Handle duplicate column names
+                col_data = df[col]
+                if isinstance(col_data, pd.DataFrame):
+                    col_series = col_data.iloc[:, 0]
+                else:
+                    col_series = col_data
+                
+                feature_series = pd.to_numeric(col_series, errors='coerce')
+                
+                # Calculate correlation only if both series have valid data
+                if len(feature_series.dropna()) > 10 and len(outcome_series.dropna()) > 10:
+                    corr = abs(feature_series.corr(outcome_series))
+                    if not np.isnan(corr):
+                        importance_scores.append(corr)
+                        feature_names.append(col)
+            except (ValueError, TypeError):
                 pass
         
         if len(feature_names) > 0:
@@ -1113,7 +1136,7 @@ def get_feature_importance(df):
     
     # Fallback: return default features (should rarely be used)
     features = [
-        'predicted_prob', 'days_since_last', 'total_giving',
+        'days_since_last', 'total_giving',
         'avg_gift', 'gift_count', 'rfm_score', 'recency_score',
         'frequency_score', 'monetary_score', 'years_active', 
         'consecutive_years'
@@ -2674,6 +2697,13 @@ def page_features(df):
     st.markdown('<div class="chart-container">', unsafe_allow_html=True)
     st.markdown("#### 📊 Feature Importance (Correlation with Target)")
     
+    # Show which outcome column is being used
+    outcome_col = 'Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else ('actual_gave' if 'actual_gave' in df.columns else None)
+    if outcome_col:
+        outcome_name = 'Gave_Again_In_2024' if outcome_col == 'Gave_Again_In_2024' else 'actual_gave'
+        st.caption(f"💡 **Note**: Feature importance is calculated as correlation with '{outcome_name}' outcome from the multi-modal fusion model dataset. "
+                   f"Higher correlation indicates stronger predictive power for identifying donors who gave again in 2024.")
+    
     fig = go.Figure(go.Bar(
         x=feature_importance['importance'],
         y=feature_importance['feature'],
@@ -2701,47 +2731,15 @@ def page_features(df):
     _plotly_chart_silent(fig, width='stretch')
     st.markdown('</div>', unsafe_allow_html=True)
     
-    # Show top correlations
-    st.markdown("#### 🔍 Feature Statistics")
-    
-    if 'actual_gave' in df.columns:
-        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        feature_cols = [c for c in numeric_cols if c not in ['actual_gave', 'donor_id', 'predicted_prob']][:10]
-        
-        stats_df = df[feature_cols].describe().T
-        stats_df['correlation'] = [df[col].corr(df['actual_gave']) for col in feature_cols]
-        stats_df = stats_df.round(3)
-        
-        st.dataframe(stats_df, width='stretch')
-    
-    # Feature Interactions
-    st.markdown("### 🔗 Feature Interactions Analysis")
-    
-    if len(feature_cols) >= 2:
-        st.markdown("#### 📊 Top Feature Correlations")
-        # Create correlation matrix for top features
-        top_features = feature_cols[:6]  # Top 6 features
-        corr_matrix = df[top_features].corr()
-        
-        fig_corr = go.Figure(data=go.Heatmap(
-            z=corr_matrix.values,
-            x=corr_matrix.index,
-            y=corr_matrix.columns,
-            colorscale='RdBu',
-            zmid=0,
-            text=corr_matrix.values.round(2),
-            texttemplate='%{text}',
-            textfont={"size": 10}
-        ))
-        fig_corr.update_layout(
-            title='Feature Correlation Matrix',
-            height=500
-        )
-        _plotly_chart_silent(fig_corr, width='stretch')
-        st.caption("💡 **What this means**: Features with high positive correlation (red) tend to vary together. High negative correlation (blue) means they move in opposite directions.")
-    
     # Feature Distributions
     st.markdown("### 📈 Feature Distribution Comparison")
+    
+    # Get feature columns for the distribution comparison
+    feature_cols = []
+    if 'actual_gave' in df.columns or 'Gave_Again_In_2024' in df.columns:
+        numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
+        feature_cols = [c for c in numeric_cols if c not in ['actual_gave', 'Gave_Again_In_2024', 'donor_id', 'predicted_prob', 'Will_Give_Again_Probability', 'Legacy_Intent_Probability']]
+        feature_cols = [c for c in feature_cols if c in df.columns][:10]
     
     if 'predicted_prob' in df.columns and len(feature_cols) > 0:
         selected_feature = st.selectbox("Select Feature to Analyze", feature_cols[:5])
@@ -2751,33 +2749,81 @@ def page_features(df):
             
             with col1:
                 # Distribution for donors who gave vs didn't
-                gave_dist = df[df['actual_gave'] == 1][selected_feature] if 'actual_gave' in df.columns else pd.Series()
-                not_gave_dist = df[df['actual_gave'] == 0][selected_feature] if 'actual_gave' in df.columns else pd.Series()
+                if 'actual_gave' in df.columns and selected_feature in df.columns:
+                    # Handle duplicate indices by resetting index
+                    df_work = df.reset_index(drop=True).copy()
+                    
+                    # Convert actual_gave to numeric, handling various formats
+                    actual_gave_work = pd.to_numeric(df_work['actual_gave'], errors='coerce')
+                    
+                    # More inclusive filtering: treat any non-zero, non-NaN value as "gave"
+                    # This handles cases where actual_gave might be True/False, 1/0, or other numeric values
+                    gave_mask = (actual_gave_work > 0) & (actual_gave_work.notna())
+                    not_gave_mask = (actual_gave_work == 0) | (actual_gave_work.isna())
+                    
+                    # Extract feature values for each group - handle potential DataFrame return
+                    if gave_mask.any():
+                        gave_feature_data = df_work.loc[gave_mask, selected_feature]
+                        if isinstance(gave_feature_data, pd.DataFrame):
+                            gave_feature = gave_feature_data.iloc[:, 0]
+                        else:
+                            gave_feature = gave_feature_data
+                    else:
+                        gave_feature = pd.Series(dtype=float)
+                    
+                    if not_gave_mask.any():
+                        not_gave_feature_data = df_work.loc[not_gave_mask, selected_feature]
+                        if isinstance(not_gave_feature_data, pd.DataFrame):
+                            not_gave_feature = not_gave_feature_data.iloc[:, 0]
+                        else:
+                            not_gave_feature = not_gave_feature_data
+                    else:
+                        not_gave_feature = pd.Series(dtype=float)
+                    
+                    # Convert to numeric and remove NaN
+                    gave_dist = pd.to_numeric(gave_feature, errors='coerce').dropna()
+                    not_gave_dist = pd.to_numeric(not_gave_feature, errors='coerce').dropna()
+                else:
+                    gave_dist = pd.Series(dtype=float)
+                    not_gave_dist = pd.Series(dtype=float)
                 
                 fig_dist = go.Figure()
-                if len(gave_dist) > 0:
-                    fig_dist.add_trace(go.Histogram(
-                        x=gave_dist,
-                        name='Gave',
-                        opacity=0.7,
-                        marker_color='#2ecc71',
-                        nbinsx=30
-                    ))
-                if len(not_gave_dist) > 0:
-                    fig_dist.add_trace(go.Histogram(
-                        x=not_gave_dist,
-                        name='Did Not Give',
-                        opacity=0.7,
-                        marker_color='#e74c3c',
-                        nbinsx=30
-                    ))
+                
+                # Combine both distributions to calculate shared bin edges
+                if len(gave_dist) > 0 or len(not_gave_dist) > 0:
+                    all_values = pd.concat([gave_dist, not_gave_dist]) if len(gave_dist) > 0 and len(not_gave_dist) > 0 else (gave_dist if len(gave_dist) > 0 else not_gave_dist)
+                    if len(all_values) > 0:
+                        min_val = all_values.min()
+                        max_val = all_values.max()
+                        # Use shared bin edges for both histograms to ensure perfect alignment
+                        num_bins = 30
+                        
+                        if len(gave_dist) > 0:
+                            fig_dist.add_trace(go.Histogram(
+                                x=gave_dist.values,
+                                name='Gave',
+                                opacity=0.5,
+                                marker_color='#2ecc71',
+                                xbins=dict(start=min_val, end=max_val, size=(max_val - min_val) / num_bins),
+                                histnorm=''
+                            ))
+                        if len(not_gave_dist) > 0:
+                            fig_dist.add_trace(go.Histogram(
+                                x=not_gave_dist.values,
+                                name='Did Not Give',
+                                opacity=0.5,
+                                marker_color='#e74c3c',
+                                xbins=dict(start=min_val, end=max_val, size=(max_val - min_val) / num_bins),
+                                histnorm=''
+                            ))
                 
                 fig_dist.update_layout(
                     title=f'Distribution: {selected_feature}',
                     xaxis_title=selected_feature,
                     yaxis_title='Count',
                     barmode='overlay',
-                    height=350
+                    height=350,
+                    showlegend=True
                 )
                 _plotly_chart_silent(fig_dist, width='stretch')
                 st.caption("💡 **What this means**: Compare the distribution of this feature between donors who gave vs. didn't. Overlap suggests the feature alone isn't highly predictive.")
