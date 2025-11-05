@@ -1187,6 +1187,7 @@ def render_sidebar(df):
 
     # Try to load and show the provided University Advancement logo
     logo_candidates = [
+        "dashboard/assets/university_advancement.png",
         "assets/university_advancement.png",
         "assets/university_advancement.jpg",
         "assets/university_advancement.webp",
