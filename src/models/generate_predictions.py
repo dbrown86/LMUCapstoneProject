@@ -73,8 +73,9 @@ model_path = os.path.join('models', 'best_influential_donor_model.pt')
 if not os.path.exists(model_path):
     # Try alternative paths
     alt_paths = [
-        '../models/best_influential_donor_model.pt',
-        '../../models/best_influential_donor_model.pt'
+        '../../models/saved_models/best_influential_donor_model.pt',
+        '../models/saved_models/best_influential_donor_model.pt',
+        '../../models/best_influential_donor_model.pt',  # Legacy fallback
     ]
     for alt_path in alt_paths:
         if os.path.exists(alt_path):
@@ -91,7 +92,10 @@ print(f"\n📂 Loading trained model from {model_path}...")
 # Load data
 print("\n📂 Loading donor data...")
 donors_paths = [
-    'data/parquet_export/donors_with_network_features.parquet',
+    'data/processed/parquet_export/donors_with_network_features.parquet',
+    '../data/processed/parquet_export/donors_with_network_features.parquet',
+    '../../data/processed/parquet_export/donors_with_network_features.parquet',
+    'data/parquet_export/donors_with_network_features.parquet',  # Legacy fallback
     '../data/parquet_export/donors_with_network_features.parquet',
     '../../data/parquet_export/donors_with_network_features.parquet'
 ]
