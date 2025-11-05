@@ -246,9 +246,11 @@ def load_full_dataset():
     
     # Priority 1: Try Parquet file (fastest - use pyarrow engine)
     parquet_paths = [
-        str(root / "data/parquet_export/donors_with_network_features.parquet"),
+        str(root / "data/processed/parquet_export/donors_with_network_features.parquet"),
+        str(root / "data/parquet_export/donors_with_network_features.parquet"),  # Legacy fallback
         str(root / "donors_with_network_features.parquet"),
         str(root / "data/donors.parquet"),
+        "data/processed/parquet_export/donors_with_network_features.parquet",
         "data/parquet_export/donors_with_network_features.parquet",
         "donors_with_network_features.parquet",
         "data/donors.parquet",
@@ -634,7 +636,8 @@ def process_dataframe(df):
                 from pathlib import Path
                 root = Path(__file__).resolve().parent.parent
                 giving_paths = [
-                    root / "data/parquet_export/giving_history.parquet",
+                    root / "data/processed/parquet_export/giving_history.parquet",
+                    root / "data/parquet_export/giving_history.parquet",  # Legacy fallback
                     root / "giving_history.parquet",
                     "data/parquet_export/giving_history.parquet"
                 ]
@@ -737,7 +740,10 @@ def process_dataframe(df):
         try:
             from pathlib import Path
             root = Path(__file__).resolve().parent.parent
-            giving_path = root / "data/parquet_export/giving_history.parquet"
+            # Try new path first, fallback to legacy
+            giving_path = root / "data/processed/parquet_export/giving_history.parquet"
+            if not giving_path.exists():
+                giving_path = root / "data/parquet_export/giving_history.parquet"
             if giving_path.exists():
                 giving_df = pd.read_parquet(giving_path, engine='pyarrow')
                 if 'Gift_Date' in giving_df.columns or 'gift_date' in giving_df.columns:
