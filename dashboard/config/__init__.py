@@ -1,5 +1,5 @@
 """
-Configuration module for the dashboard.
+Configuration settings for the dashboard.
 """
 
 from . import settings
