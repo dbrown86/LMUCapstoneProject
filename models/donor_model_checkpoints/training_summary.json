@@ -1,0 +1,12 @@
+{
+  "auc": 0.948859268783399,
+  "f1": 0.8533871223624867,
+  "accuracy": 0.87062,
+  "precision": 0.7443267177986874,
+  "recall": 0.9998937808699346,
+  "baseline_auc": null,
+  "lift": null,
+  "optimal_threshold": 0.5699999999999997,
+  "f1_default": 0.8533617349135489,
+  "accuracy_default": 0.87058
+}

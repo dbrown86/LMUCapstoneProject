@@ -1,0 +1,9 @@
+Feature Type,Target,Silhouette Score,Interpretation
+Tabular Only,Legacy Intent,0.12589360079479234,NONE - no meaningful clustering
+Tabular Only,Family Structure,-0.011573049992189706,NONE - no meaningful clustering
+BERT Only,Legacy Intent,0.009299304336309433,NONE - no meaningful clustering
+BERT Only,Family Structure,-0.0006508674705401063,NONE - no meaningful clustering
+GNN Only,Legacy Intent,0.2427852749824524,WEAK - minimal clustering
+GNN Only,Family Structure,0.10547704994678497,NONE - no meaningful clustering
+Multimodal Fusion,Legacy Intent,0.03497224953631706,NONE - no meaningful clustering
+Multimodal Fusion,Family Structure,0.006580939539155303,NONE - no meaningful clustering
