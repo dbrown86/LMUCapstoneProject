@@ -14,13 +14,13 @@ except ImportError:
     st = None
 
 
-def plotly_chart_silent(fig, width='stretch'):
+def plotly_chart_silent(fig, use_container_width=True):
     """
     Display Plotly chart with all warnings suppressed.
     
     Args:
         fig: Plotly figure object
-        width: Chart width ('stretch' or specific width)
+        use_container_width: If True, set chart width to container width.
     
     Returns:
         Streamlit chart component (if Streamlit available)
@@ -31,5 +31,5 @@ def plotly_chart_silent(fig, width='stretch'):
     
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        return st.plotly_chart(fig, width=width)
+        return st.plotly_chart(fig, use_container_width=use_container_width)
 

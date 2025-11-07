@@ -106,16 +106,12 @@ def get_css_styles() -> str:
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
     
-    /* Hide Streamlit deprecation warnings */
-    [data-testid="stWarning"],
-    [data-testid="stAlert"],
-    .stAlert {
-        display: none !important;
-        visibility: hidden !important;
-        height: 0 !important;
-        margin: 0 !important;
-        padding: 0 !important;
-    }
+    /* Hide Streamlit's automatic page navigation */
+    [data-testid="stSidebarNav"] {display: none;}
+    section[data-testid="stSidebarNav"] {display: none;}
+    .css-1544g2n {display: none;}  /* Legacy selector for page nav */
+    
+    /* Do not blanket-hide Streamlit alerts; deprecations filtered via JS below */
     
     .page-title {
         font-size: 36px;
