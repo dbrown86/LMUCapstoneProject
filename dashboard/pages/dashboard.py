@@ -268,8 +268,17 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                                          category_orders={'segment': ['Recent (0-6mo)', 'Recent (6-12mo)', 'Lapsed (1-2yr)', 'Very Lapsed (2yr+)', 'Prospects/New']},
                                          color_discrete_sequence=['#4caf50', '#8bc34a', '#ffc107', '#ff5722', '#9e9e9e'])
                     fig_segment.update_traces(texttemplate='%{y:,}', textposition='outside')
-                    fig_segment.update_layout(height=350, showlegend=False, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig_segment)
+                    max_count = summary['Count'].max()
+                    padding = max(1, max_count * 0.40) if pd.notna(max_count) else 1
+                    fig_segment.update_layout(
+                        height=350,
+                        showlegend=False,
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        margin=dict(t=70, b=60)
+                    )
+                    fig_segment.update_yaxes(range=[0, max_count + padding], automargin=True)
+                    st.plotly_chart(fig_segment, use_container_width=True)
                 else:
                     st.info("No segment data available to display.")
             else:
@@ -337,31 +346,44 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                     if outcome_col_ct is not None and outcome_col_ct in df_filtered.columns:
                         df_ct['outcome'] = pd.to_numeric(df_filtered[outcome_col_ct], errors='coerce')
 
-                    # Aggregate (median for probability) without counting on the grouped key to avoid duplicate column on reset_index
+                    # Aggregate (mean for probability) without counting on the grouped key to avoid duplicate column on reset_index
                     group_obj = df_ct.groupby(donor_type_col, observed=False)
-                    perf_ct = group_obj['prob'].median().to_frame('Med_Prob')
+                    perf_ct = group_obj['prob'].mean().to_frame('Mean_Prob')
+                    perf_ct['Count'] = group_obj.size().values
                     if 'outcome' in df_ct.columns:
                         perf_ct['outcome'] = group_obj['outcome'].mean()
-                    perf_ct['Count'] = group_obj.size().values
                     perf_ct = perf_ct.reset_index().rename(columns={donor_type_col: 'Constituency'})
 
-                    # Sort by Med_Prob descending for readability
-                    perf_ct = perf_ct.sort_values('Med_Prob', ascending=False)
+                    # Include key constituencies even if filtered out or zero members
+                    key_constituencies = ['Alum', 'Regent', 'Trustee']
+                    for constituency in key_constituencies:
+                        if constituency not in perf_ct['Constituency'].values:
+                            row = {
+                                'Constituency': constituency,
+                                'Mean_Prob': 0.0,
+                                'Count': 0
+                            }
+                            if 'outcome' in perf_ct.columns:
+                                row['outcome'] = 0.0
+                            perf_ct = pd.concat([perf_ct, pd.DataFrame([row])], ignore_index=True)
+
+                    # Sort by Mean_Prob descending for readability
+                    perf_ct = perf_ct.sort_values('Mean_Prob', ascending=False)
 
                     # Build bar chart with hover showing conversion if available
                     fig_ct = go.Figure()
-                    hover_tmpl = '<b>%{x}</b><br>Median Probability: %{y:.1%}'
+                    hover_tmpl = '<b>%{x}</b><br>Mean Probability: %{y:.1%}'
 
-                    # Color each donor type distinctly (applies to median bars)
+                    # Color each donor type distinctly (applies to mean bars)
                     palette = ['#4caf50', '#2196f3', '#ff9800', '#9c27b0', '#e91e63', '#00bcd4', '#8bc34a', '#ffc107', '#795548', '#607d8b']
                     colors = [palette[i % len(palette)] for i in range(len(perf_ct))]
                     if 'outcome' in perf_ct.columns:
-                        # Median prediction probability by constituency (colored per donor type)
+                        # Mean prediction probability by constituency (colored per donor type)
                         fig_ct.add_trace(go.Bar(
                             x=perf_ct['Constituency'],
-                            y=perf_ct['Med_Prob'],
+                            y=perf_ct['Mean_Prob'],
                             marker_color=colors,
-                            text=perf_ct['Med_Prob'].apply(lambda v: f"{v:.1%}"),
+                            text=perf_ct['Mean_Prob'].apply(lambda v: f"{v:.1%}"),
                             textposition='outside',
                             customdata=np.c_[perf_ct['Count'].values, perf_ct['outcome'].values],
                             hovertemplate=hover_tmpl + '<br>Donors: %{customdata[0]:,}<br>Gave Again Rate: %{customdata[1]:.1%}<extra></extra>'
@@ -377,25 +399,25 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                             hovertemplate='<b>%{x}</b><br>Gave Again Rate: %{y:.1%}<extra></extra>'
                         ))
                     else:
-                        # Median prediction probability by constituency (no outcomes available)
+                        # Mean prediction probability by constituency (no outcomes available)
                         fig_ct.add_trace(go.Bar(
                             x=perf_ct['Constituency'],
-                            y=perf_ct['Med_Prob'],
+                            y=perf_ct['Mean_Prob'],
                             marker_color=colors,
-                            text=perf_ct['Med_Prob'].apply(lambda v: f"{v:.1%}"),
+                            text=perf_ct['Mean_Prob'].apply(lambda v: f"{v:.1%}"),
                             textposition='outside',
                             customdata=np.c_[perf_ct['Count'].values],
                             hovertemplate=hover_tmpl + '<br>Donors: %{customdata[0]:,}<extra></extra>'
                         ))
 
                     # Y axis from 0 to max with padding, cap at 1.0
-                    # Y-axis max accounts for both median prob and outcome rate (if present)
-                    base_max = perf_ct['Med_Prob'].max() if len(perf_ct) else 0.5
+                    # Y-axis max accounts for both mean prob and outcome rate (if present)
+                    base_max = perf_ct['Mean_Prob'].max() if len(perf_ct) else 0.5
                     if 'outcome' in perf_ct.columns:
                         base_max = max(base_max, perf_ct['outcome'].max())
                     y_max_ct = float(min(1.0, max(0.1, base_max * 1.15)))
                     fig_ct.update_layout(
-                        title='Median Prediction Probability by Constituency Type',
+                        title='Mean Prediction Probability by Constituency Type',
                         yaxis_title='Probability',
                         height=420,
                         yaxis=dict(range=[0, y_max_ct], showgrid=True, gridcolor='#e0e0e0'),
