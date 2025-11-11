@@ -47,6 +47,7 @@ def render(df: pd.DataFrame):
     fusion_f1 = actual_metrics.get('f1')  # Keep None if not available
     fusion_precision = actual_metrics.get('precision')  # Keep None if not available
     fusion_recall = actual_metrics.get('recall')  # Keep None if not available
+    fusion_specificity = actual_metrics.get('specificity')  # Keep None if not available
     
     # Try to compute fusion metrics from data if not in saved metrics
     if (fusion_f1 is None or fusion_precision is None or fusion_recall is None) and 'actual_gave' in df.columns and 'predicted_prob' in df.columns:
@@ -110,80 +111,188 @@ def render(df: pd.DataFrame):
         st.error("❌ **Cannot display comparison**: Missing baseline AUC or fusion AUC. Please ensure both models have been evaluated.")
         return
     
-    col1, col2 = st.columns([2, 1])
-    
+    # 3. KEY INSIGHTS CARDS (moved to top per request)
+    st.markdown("### 💡 Key Insights")
+
+    # Calculate actual performance gain vs baseline
+    performance_gain = None
+    if baseline_auc is not None and fusion_auc is not None and baseline_auc > 0:
+        performance_gain = ((fusion_auc - baseline_auc) / baseline_auc) * 100
+
+    # Calculate lift if available
+    lift_display = actual_metrics.get('lift')
+    lift_display = f"+{lift_display:.1%}" if lift_display is not None else "N/A"
+
+    # Get actual fusion accuracy if available
+    fusion_accuracy = actual_metrics.get('accuracy')
+
+    col1, col2, col3 = st.columns(3)
+    accuracy_improvement = None
     with col1:
-        # Create focused comparison chart with actual data prominently displayed
-        fig_actual = go.Figure()
-        
-        # Actual models (prominent bars) - only show if we have both values
-        fig_actual.add_trace(go.Bar(
-            name='Recency Baseline',
-            x=['Recency Baseline'],
-            y=[baseline_auc],
-            marker_color='#e74c3c',
-            hovertemplate='<b>Recency Baseline</b><br>AUC: %{y:.2%}<br>F1: %{customdata[0]:.2%}<extra></extra>' if baseline_f1 is not None else '<b>Recency Baseline</b><br>AUC: %{y:.2%}<extra></extra>',
-            customdata=[[baseline_f1]] if baseline_f1 is not None else None,
-            width=0.5
-        ))
-        
-        fig_actual.add_trace(go.Bar(
-            name='Multimodal Fusion',
-            x=['Multimodal Fusion'],
-            y=[fusion_auc],
-            marker_color='#2ecc71',
-            hovertemplate='<b>Multimodal Fusion</b><br>AUC: %{y:.2%}<br>F1: %{customdata[0]:.2%}<extra></extra>' if fusion_f1 is not None else '<b>Multimodal Fusion</b><br>AUC: %{y:.2%}<extra></extra>',
-            customdata=[[fusion_f1]] if fusion_f1 is not None else None,
-            width=0.5
-        ))
-        
-        # Calculate improvement
-        improvement = ((fusion_auc - baseline_auc) / baseline_auc * 100) if baseline_auc > 0 else 0
-        
-        fig_actual.update_layout(
-            title='Actual Model Performance: Baseline vs. Fusion',
-            xaxis_title='Model Type',
-            yaxis_title='AUC Score',
-            height=400,
-            barmode='group',
-            plot_bgcolor='rgba(0,0,0,0)',
-            paper_bgcolor='rgba(0,0,0,0)',
-            xaxis=dict(showgrid=False),
-            yaxis=dict(showgrid=True, gridcolor='#e0e0e0'),
-            showlegend=False
-        )
-        
-        # Add improvement annotation
-        fig_actual.add_annotation(
-            x=1,
-            y=(baseline_auc + fusion_auc) / 2,
-            text=f"+{improvement:.1f}% improvement",
-            showarrow=True,
-            arrowhead=2,
-            arrowsize=1,
-            arrowwidth=2,
-            arrowcolor="#27ae60",
-            ax=0,
-            ay=-30,
-            bgcolor="rgba(255,255,255,0.9)",
-            bordercolor="#27ae60",
-            borderwidth=2,
-            font=dict(size=12, color="#27ae60")
-        )
-        
-        st.plotly_chart(fig_actual)
+        if performance_gain is not None:
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color: #2ecc71;">
+                <div class="metric-icon">🏆</div>
+                <div class="metric-label">Performance Gain</div>
+                <div class="metric-value" style="color: #2ecc71;">+{performance_gain:.1f}%</div>
+                <div class="metric-delta" style="background: #d5f4e6; color: #27ae60;">
+                    vs. Baseline
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("Performance gain calculation requires baseline metrics")
+
+    with col2:
+        if lift_display != "N/A":
+            st.markdown(f"""
+            <div class="metric-card" style="border-left-color: #3498db;">
+                <div class="metric-icon">📈</div>
+                <div class="metric-label">Lift vs Baseline</div>
+                <div class="metric-value" style="color: #3498db;">{lift_display}</div>
+                <div class="metric-delta" style="background: #d6eaf8; color: #2874a6;">
+                    AUC Improvement
+                </div>
+            </div>
+            """, unsafe_allow_html=True)
+        else:
+            st.info("Lift calculation requires baseline AUC")
+
+    with col3:
+        if fusion_accuracy is not None:
+            baseline_accuracy = None
+            # Try to calculate baseline accuracy if we have the data
+            if 'days_since_last' in df.columns and 'actual_gave' in df.columns:
+                try:
+                    from sklearn.metrics import accuracy_score
+                    y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
+                    days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
+                    mask = y_true_series.notna() & days_series.notna()
+                    y_true = y_true_series.loc[mask].astype(int).values
+                    days_valid = days_series.loc[mask].astype(float).values
+                    if y_true.size and np.unique(y_true).size >= 2:
+                        max_days = np.nanpercentile(days_valid, 95) if days_valid.size else np.nan
+                        if np.isfinite(max_days) and max_days > 0:
+                            baseline_pred = ((1 - (np.clip(days_valid, 0, max_days) / max_days)) >= 0.5).astype(int)
+                            baseline_accuracy = accuracy_score(y_true, baseline_pred)
+                except Exception:
+                    pass
+            
+            if baseline_accuracy is not None:
+                accuracy_improvement = ((fusion_accuracy - baseline_accuracy) / baseline_accuracy * 100)
+                st.markdown(f"""
+                <div class="metric-card" style="border-left-color: #9b59b6;">
+                    <div class="metric-icon">✅</div>
+                    <div class="metric-label">Accuracy</div>
+                    <div class="metric-value" style="color: #9b59b6;">{fusion_accuracy:.1%}</div>
+                    <div class="metric-delta" style="background: #ebdef0; color: #7d3c98;">
+                        +{accuracy_improvement:.1f}% vs Baseline
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+            else:
+                st.markdown(f"""
+                <div class="metric-card" style="border-left-color: #9b59b6;">
+                    <div class="metric-icon">✅</div>
+                    <div class="metric-label">Fusion Accuracy</div>
+                    <div class="metric-value" style="color: #9b59b6;">{fusion_accuracy:.1%}</div>
+                    <div class="metric-delta" style="background: #ebdef0; color: #7d3c98;">
+                        Actual Result
+                    </div>
+                </div>
+                """, unsafe_allow_html=True)
+        else:
+            st.info("Accuracy metrics not available")
+
+    col1, col2 = st.columns([2, 1])
+
+    with col1:
+        comparison_metrics = []
+        baseline_series = []
+        fusion_series = []
+        improvements = {}
+
+        def add_metric(label, baseline_value, fusion_value):
+            if baseline_value is not None and fusion_value is not None:
+                comparison_metrics.append(label)
+                baseline_series.append(baseline_value)
+                fusion_series.append(fusion_value)
+                if baseline_value not in (0, None):
+                    improvements[label] = (fusion_value - baseline_value) / baseline_value * 100
+                else:
+                    improvements[label] = None
+
+        add_metric('AUC', baseline_auc, fusion_auc)
+        add_metric('F1', baseline_f1, fusion_f1)
+        add_metric('Precision', baseline_precision, fusion_precision)
+        add_metric('Recall', baseline_recall, fusion_recall)
+        add_metric('Specificity', baseline_specificity, fusion_specificity)
+
+        if not comparison_metrics:
+            st.error("❌ **Cannot display comparison**: Missing overlapping baseline/fusion metrics.")
+        else:
+            fig_actual = go.Figure()
+            fig_actual.add_trace(go.Bar(
+                name='Recency Baseline',
+                x=comparison_metrics,
+                y=baseline_series,
+                marker_color='#e74c3c',
+                text=[f"{value:.2%}" for value in baseline_series],
+                textposition='outside',
+                hovertemplate='<b>%{x} — Baseline</b><br>%{y:.2%}<extra></extra>'
+            ))
+            fig_actual.add_trace(go.Bar(
+                name='Multimodal Fusion',
+                x=comparison_metrics,
+                y=fusion_series,
+                marker_color='#2ecc71',
+                text=[f"{value:.2%}" for value in fusion_series],
+                textposition='outside',
+                hovertemplate='<b>%{x} — Fusion</b><br>%{y:.2%}<extra></extra>'
+            ))
+
+            fig_actual.update_layout(
+                title='Actual Model Performance: Baseline vs. Fusion',
+                xaxis_title='Metric',
+                yaxis_title='Score',
+                height=420,
+                barmode='group',
+                plot_bgcolor='rgba(0,0,0,0)',
+                paper_bgcolor='rgba(0,0,0,0)',
+                xaxis=dict(showgrid=False),
+                yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat='.0%'),
+                legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
+            )
+
+            if 'AUC' in improvements and improvements['AUC'] is not None:
+                auc_index = comparison_metrics.index('AUC')
+                auc_peak = max(baseline_series[auc_index], fusion_series[auc_index])
+                fig_actual.add_annotation(
+                    x='AUC',
+                    y=min(1.0, auc_peak + 0.05),
+                    text=f"+{improvements['AUC']:.1f}% vs baseline",
+                    showarrow=False,
+                    font=dict(size=12, color='#27ae60'),
+                    bgcolor='rgba(255,255,255,0.9)',
+                    bordercolor='#27ae60',
+                    borderwidth=1
+                )
+
+            st.plotly_chart(fig_actual, use_container_width=True)
+            improvement = improvements.get('AUC')
     
     with col2:
         st.markdown("### 📈 Key Metrics")
-        st.metric("Baseline AUC", f"{baseline_auc:.2%}", delta=None)
-        st.metric("Fusion AUC", f"{fusion_auc:.2%}", delta=f"+{improvement:.1f}%")
-        st.metric("Improvement", f"+{improvement:.1f}%", delta=None)
-        
-        if baseline_f1 is not None:
-            st.markdown("---")
-            st.metric("Baseline F1", f"{baseline_f1:.2%}", delta=None)
-            st.metric("Fusion F1", f"{fusion_f1:.2%}", delta=f"+{((fusion_f1 - baseline_f1) / baseline_f1 * 100):.1f}%")
-    
+        if fusion_auc is not None and improvement is not None:
+            st.metric("Fusion AUC", f"{fusion_auc:.2%}", delta=f"+{improvement:.1f}%")
+
+        if fusion_accuracy is not None and accuracy_improvement is not None:
+            st.metric("Fusion Accuracy", f"{fusion_accuracy:.2%}", delta=f"+{accuracy_improvement:.1f}%")
+
+        if fusion_specificity is not None and baseline_specificity not in (None, 0):
+            specificity_delta = (fusion_specificity - baseline_specificity) / baseline_specificity * 100
+            st.metric("Fusion Specificity", f"{fusion_specificity:.2%}", delta=f"+{specificity_delta:.1f}%")
+
     # 1b. BEFORE/AFTER SCENARIOS
     st.markdown("### 📊 Real-World Impact: Before & After Scenarios")
     
@@ -206,7 +315,7 @@ def render(df: pd.DataFrame):
         
         with col1:
             st.markdown("""
-            <div style="background: #fee; padding: 20px; border-radius: 10px; border-left: 5px solid #e74c3c;">
+            <div style="background: #fee; color: #111; padding: 20px; border-radius: 10px; border-left: 5px solid #e74c3c;">
                 <h4 style="color: #c0392b; margin-top: 0;">❌ Old Way (Baseline)</h4>
                 <p style="font-size: 16px; line-height: 1.8;">
                     <strong>Contact 10,000 donors</strong> → <strong style="color: #e74c3c;">{:,} respond</strong> ({:.1%})
@@ -219,7 +328,7 @@ def render(df: pd.DataFrame):
         
         with col2:
             st.markdown("""
-            <div style="background: #efe; padding: 20px; border-radius: 10px; border-left: 5px solid #2ecc71;">
+            <div style="background: #efe; color: #111; padding: 20px; border-radius: 10px; border-left: 5px solid #2ecc71;">
                 <h4 style="color: #27ae60; margin-top: 0;">✅ New Way (Fusion Model)</h4>
                 <p style="font-size: 16px; line-height: 1.8;">
                     <strong>Contact 10,000 targeted donors</strong> → <strong style="color: #2ecc71;">{:,} respond</strong> ({:.1%})
@@ -312,8 +421,8 @@ def render(df: pd.DataFrame):
                 opacity=0.4,
                 line=dict(width=3),
                 marker=dict(size=10, symbol='circle', line=dict(width=2, color='white')),
-                hovertemplate='%{hovertext}<extra></extra>',
-                hovertext=fusion_hover
+                        hovertemplate='%{hovertext}<extra></extra>',
+                        hovertext=fusion_hover
             ))
             
             # Add baseline trace second (rendered on top)
@@ -329,6 +438,17 @@ def render(df: pd.DataFrame):
                 marker=dict(size=12, symbol='circle', line=dict(width=2, color='white')),
                 hovertemplate='%{hovertext}<extra></extra>',
                 hovertext=baseline_hover
+            ))
+            label_radius = max(max(baseline_r, default=0), max(fusion_r, default=0), 1.0) + 0.02
+            fig_radar.add_trace(go.Scatterpolar(
+                r=[label_radius] * len(theta_labels),
+                theta=theta_labels,
+                mode='text',
+                text=[f"<b>{label}</b>" for label in theta_labels],
+                textposition='middle center',
+                textfont=dict(color='white', size=13, family='Arial'),
+                hoverinfo='skip',
+                showlegend=False
             ))
         else:
             st.error("❌ **Invalid data values detected** - Some metrics contain NaN or invalid numbers.")
@@ -375,218 +495,3 @@ def render(df: pd.DataFrame):
             hovermode='closest'
         )
         st.plotly_chart(fig_radar)
-    
-    # 2b. CONFUSION MATRIX INSIGHTS
-    if fusion_recall is not None and fusion_precision is not None and baseline_recall is not None and baseline_precision is not None:
-        st.markdown("### 🎯 Confusion Matrix Insights")
-        
-        col1, col2 = st.columns(2)
-        
-        with col1:
-            st.markdown(f"""
-            <div style="background: #fee; padding: 20px; border-radius: 10px; border-left: 5px solid #e74c3c;">
-                <h4 style="color: #c0392b; margin-top: 0;">Baseline Model Performance</h4>
-                <ul style="line-height: 2.0;">
-                    <li><strong>Correctly identifies {baseline_recall:.1%}</strong> of actual donors</li>
-                    <li><strong>Correctly avoids {(baseline_specificity if baseline_specificity is not None else 0.426):.1%}</strong> of non-donors</li>
-                    <li><strong>Precision:</strong> {baseline_precision:.1%} of predicted donors actually give</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        with col2:
-            st.markdown(f"""
-            <div style="background: #efe; padding: 20px; border-radius: 10px; border-left: 5px solid #2ecc71;">
-                <h4 style="color: #27ae60; margin-top: 0;">Fusion Model Performance</h4>
-                <ul style="line-height: 2.0;">
-                    <li><strong>Correctly identifies {fusion_recall:.1%}</strong> of actual donors</li>
-                    <li><strong>Correctly avoids {(fusion_specificity if fusion_specificity is not None else 0.853):.1%}</strong> of non-donors</li>
-                    <li><strong>Precision:</strong> {fusion_precision:.1%} of predicted donors actually give</li>
-                </ul>
-            </div>
-            """, unsafe_allow_html=True)
-        
-        recall_improvement = ((fusion_recall - baseline_recall) / baseline_recall * 100) if baseline_recall > 0 else 0
-        specificity_improvement = ((fusion_specificity - baseline_specificity) / baseline_specificity * 100) if baseline_specificity and baseline_specificity > 0 else 0
-        
-        st.info(f"""
-        **Key Insights:**
-        - **{recall_improvement:.1f}% better at finding donors**: The Fusion model identifies {fusion_recall:.1%} vs {baseline_recall:.1%} with baseline
-        - **{specificity_improvement:.1f}% better at avoiding wasted effort**: The Fusion model correctly avoids {(fusion_specificity if fusion_specificity is not None else 0.853):.1%} vs {(baseline_specificity if baseline_specificity is not None else 0.426):.1%} with baseline
-        - **Higher precision means less waste**: {fusion_precision:.1%} of our Fusion predictions are correct vs {baseline_precision:.1%} with baseline
-        """)
-    
-    # 3. KEY INSIGHTS CARDS
-    st.markdown("### 💡 Key Insights")
-    
-    # Calculate actual performance gain vs baseline
-    performance_gain = None
-    if baseline_auc is not None and fusion_auc is not None and baseline_auc > 0:
-        performance_gain = ((fusion_auc - baseline_auc) / baseline_auc) * 100
-    
-    # Calculate lift if available
-    lift_display = actual_metrics.get('lift')
-    lift_display = f"+{lift_display:.1%}" if lift_display is not None else "N/A"
-    
-    # Get actual fusion accuracy if available
-    fusion_accuracy = actual_metrics.get('accuracy')
-    
-    col1, col2, col3 = st.columns(3)
-    with col1:
-        if performance_gain is not None:
-            st.markdown(f"""
-            <div class="metric-card" style="border-left-color: #2ecc71;">
-                <div class="metric-icon">🏆</div>
-                <div class="metric-label">Performance Gain</div>
-                <div class="metric-value" style="color: #2ecc71;">+{performance_gain:.1f}%</div>
-                <div class="metric-delta" style="background: #d5f4e6; color: #27ae60;">
-                    vs. Baseline
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.info("Performance gain calculation requires baseline metrics")
-    
-    with col2:
-        if lift_display != "N/A":
-            st.markdown(f"""
-            <div class="metric-card" style="border-left-color: #3498db;">
-                <div class="metric-icon">📈</div>
-                <div class="metric-label">Lift vs Baseline</div>
-                <div class="metric-value" style="color: #3498db;">{lift_display}</div>
-                <div class="metric-delta" style="background: #d6eaf8; color: #2874a6;">
-                    AUC Improvement
-                </div>
-            </div>
-            """, unsafe_allow_html=True)
-        else:
-            st.info("Lift calculation requires baseline AUC")
-    
-    with col3:
-        if fusion_accuracy is not None:
-            baseline_accuracy = None
-            # Try to calculate baseline accuracy if we have the data
-            if 'days_since_last' in df.columns and 'actual_gave' in df.columns:
-                try:
-                    from sklearn.metrics import accuracy_score
-                    y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
-                    days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
-                    mask = y_true_series.notna() & days_series.notna()
-                    y_true = y_true_series.loc[mask].astype(int).values
-                    days_valid = days_series.loc[mask].astype(float).values
-                    if y_true.size and np.unique(y_true).size >= 2:
-                        max_days = np.nanpercentile(days_valid, 95) if days_valid.size else np.nan
-                        if np.isfinite(max_days) and max_days > 0:
-                            baseline_pred = ((1 - (np.clip(days_valid, 0, max_days) / max_days)) >= 0.5).astype(int)
-                            baseline_accuracy = accuracy_score(y_true, baseline_pred)
-                except Exception:
-                    pass
-            
-            if baseline_accuracy is not None:
-                accuracy_improvement = ((fusion_accuracy - baseline_accuracy) / baseline_accuracy * 100)
-                st.markdown(f"""
-                <div class="metric-card" style="border-left-color: #9b59b6;">
-                    <div class="metric-icon">✅</div>
-                    <div class="metric-label">Accuracy</div>
-                    <div class="metric-value" style="color: #9b59b6;">{fusion_accuracy:.1%}</div>
-                    <div class="metric-delta" style="background: #ebdef0; color: #7d3c98;">
-                        +{accuracy_improvement:.1f}% vs Baseline
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-            else:
-                st.markdown(f"""
-                <div class="metric-card" style="border-left-color: #9b59b6;">
-                    <div class="metric-icon">✅</div>
-                    <div class="metric-label">Fusion Accuracy</div>
-                    <div class="metric-value" style="color: #9b59b6;">{fusion_accuracy:.1%}</div>
-                    <div class="metric-delta" style="background: #ebdef0; color: #7d3c98;">
-                        Actual Result
-                    </div>
-                </div>
-                """, unsafe_allow_html=True)
-        else:
-            st.info("Accuracy metrics not available")
-    
-    # 4. COMPARISON TABLE
-    st.markdown("### 📋 Detailed Performance Comparison")
-    
-    # Build comparison table with all metrics
-    comparison_data = {
-        'Model': ['Recency Baseline', 'Multimodal Fusion'],
-        'AUC': [baseline_auc if baseline_auc is not None else "N/A", 
-                fusion_auc if fusion_auc is not None else "N/A"],
-    }
-    
-    # Add all metrics
-    comparison_data['F1'] = [
-        baseline_f1 if baseline_f1 is not None else "N/A",
-        fusion_f1 if fusion_f1 is not None else "N/A"
-    ]
-    
-    comparison_data['Precision'] = [
-        baseline_precision if baseline_precision is not None else "N/A",
-        fusion_precision if fusion_precision is not None else "N/A"
-    ]
-    
-    comparison_data['Recall'] = [
-        baseline_recall if baseline_recall is not None else "N/A",
-        fusion_recall if fusion_recall is not None else "N/A"
-    ]
-    
-    if fusion_accuracy is not None:
-        baseline_accuracy = None
-        # Try to calculate baseline accuracy
-        if 'days_since_last' in df.columns and 'actual_gave' in df.columns:
-            try:
-                from sklearn.metrics import accuracy_score
-                y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
-                days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
-                mask = y_true_series.notna() & days_series.notna()
-                y_true = y_true_series.loc[mask].astype(int).values
-                days_valid = days_series.loc[mask].astype(float).values
-                if y_true.size and np.unique(y_true).size >= 2:
-                    max_days = np.nanpercentile(days_valid, 95) if days_valid.size else np.nan
-                    if np.isfinite(max_days) and max_days > 0:
-                        baseline_pred = ((1 - (np.clip(days_valid, 0, max_days) / max_days)) >= 0.5).astype(int)
-                        baseline_accuracy = accuracy_score(y_true, baseline_pred)
-            except Exception:
-                pass
-        
-        comparison_data['Accuracy'] = [
-            baseline_accuracy if baseline_accuracy is not None else "N/A",
-            fusion_accuracy
-        ]
-    
-    comparison_table = pd.DataFrame(comparison_data)
-    
-    # Format percentages for display
-    for col in comparison_table.columns:
-        if col != 'Model':
-            comparison_table[col] = comparison_table[col].apply(
-                lambda x: f"{x:.2%}" if isinstance(x, (int, float)) and not np.isnan(x) else "N/A"
-            )
-    
-    st.dataframe(comparison_table, width='stretch', hide_index=True)
-    
-    # 5. INTERPRETATION GUIDE
-    st.markdown("### 📚 Key Takeaways")
-    
-    st.markdown("""
-    **What This Shows:**
-    
-    The green bars and shapes represent the **Multimodal Fusion** model - our advanced prediction system that uses multiple types of information 
-    (giving history, timing, relationships, etc.) to identify likely donors. The red represents a simple baseline that only looks at how recently someone gave.
-    
-    **The Bottom Line:**
-    
-    The Fusion model significantly outperforms the baseline across all measures. This means:
-    
-    - **Better accuracy** - It's more likely to correctly identify who will donate
-    - **Fewer missed opportunities** - It finds more of the actual donors
-    - **Less wasted effort** - It's better at avoiding people who won't donate
-    - **Higher confidence** - All the numbers point to the Fusion model being the superior choice
-    
-    When you see the green values much higher than red across the board, it's clear that combining multiple data sources leads to much better predictions 
-    than just looking at recency alone.
-    """)
