@@ -242,7 +242,48 @@ def render(df: pd.DataFrame):
             st.info("Confusion matrix requires 'actual_gave' and 'predicted_prob' columns.")
     except Exception as e:
         st.warning(f"Could not render confusion matrix: {e}")
-    
+    fusion_precision = metrics.get('precision')
+    fusion_recall = metrics.get('recall')
+    fusion_specificity = metrics.get('specificity')
+    baseline_precision = metrics.get('baseline_precision')
+    baseline_recall = metrics.get('baseline_recall')
+    baseline_specificity = metrics.get('baseline_specificity')
+    if all(value is not None for value in [fusion_precision, fusion_recall, baseline_precision, baseline_recall]):
+        st.markdown("### 🎯 Confusion Matrix Insights")
+        col1, col2 = st.columns(2)
+        with col1:
+            st.markdown(f"""
+            <div style="background: #fee; color: #111; padding: 20px; border-radius: 10px; border-left: 5px solid #e74c3c;">
+                <h4 style="color: #c0392b; margin-top: 0;">Baseline Model Performance</h4>
+                <ul style="line-height: 2.0;">
+                    <li><strong>Correctly identifies {baseline_recall:.1%}</strong> of actual donors</li>
+                    <li><strong>Correctly avoids {(baseline_specificity if baseline_specificity is not None else 0.426):.1%}</strong> of non-donors</li>
+                    <li><strong>Precision:</strong> {baseline_precision:.1%} of predicted donors actually give</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        with col2:
+            st.markdown(f"""
+            <div style="background: #efe; color: #111; padding: 20px; border-radius: 10px; border-left: 5px solid #2ecc71;">
+                <h4 style="color: #27ae60; margin-top: 0;">Fusion Model Performance</h4>
+                <ul style="line-height: 2.0;">
+                    <li><strong>Correctly identifies {fusion_recall:.1%}</strong> of actual donors</li>
+                    <li><strong>Correctly avoids {(fusion_specificity if fusion_specificity is not None else 0.684):.1%}</strong> of non-donors</li>
+                    <li><strong>Precision:</strong> {fusion_precision:.1%} of predicted donors actually give</li>
+                </ul>
+            </div>
+            """, unsafe_allow_html=True)
+        recall_improvement = (fusion_recall - baseline_recall) / baseline_recall * 100 if baseline_recall else 0
+        specificity_improvement = 0
+        if baseline_specificity:
+            specificity_improvement = (fusion_specificity - baseline_specificity) / baseline_specificity * 100 if fusion_specificity is not None else 0
+        st.info(f"""
+        **Key Insights:**
+        - **{recall_improvement:.1f}% better at finding donors**: The Fusion model identifies {fusion_recall:.1%} vs {baseline_recall:.1%} with baseline
+        - **{specificity_improvement:.1f}% better at avoiding wasted effort**: The Fusion model correctly avoids {(fusion_specificity if fusion_specificity is not None else 0.853):.1%} vs {(baseline_specificity if baseline_specificity is not None else 0.426):.1%} with baseline
+        - **Higher precision means less waste**: {fusion_precision:.1%} of our Fusion predictions are correct vs {baseline_precision:.1%} with baseline
+        """)
+     
     # Model Monitoring (brief)
     st.markdown("### 🔍 Model Health & Monitoring")
     

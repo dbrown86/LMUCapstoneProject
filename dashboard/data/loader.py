@@ -193,6 +193,8 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         'Last_Gift_Date': 'last_gift_date',
         'Lifetime_Giving': 'total_giving',
         'lifetime_giving': 'total_giving',
+        'Lifetime Giving': 'total_giving',
+        'LifetimeGiving': 'total_giving',
         'total_amount': 'total_giving',
         'Average_Gift': 'avg_gift',
         'average_gift': 'avg_gift',
@@ -333,7 +335,14 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             df[col] = default_val
         else:
             try:
-                df[col] = pd.to_numeric(df[col], errors='coerce').fillna(default_val)
+                series = df[col]
+                if isinstance(series, pd.DataFrame):
+                    series = series.iloc[:, 0]
+
+                if series.dtype == object:
+                    series = series.replace({r'[^\d\.\-]': ''}, regex=True)
+
+                df[col] = pd.to_numeric(series, errors='coerce').fillna(default_val)
             except (TypeError, AttributeError):
                 df[col] = default_val
     
@@ -352,27 +361,38 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         )
     
     # Create segment
-    def assign_segment(row):
-        gift_count = row.get('gift_count', 0)
-        days = row.get('days_since_last', np.nan)
-        
-        if pd.isna(days) or gift_count == 0 or days > 3650:
-            return 'Prospects/New'
-        elif days <= 180:
-            return 'Recent (0-6mo)'
-        elif days <= 365:
-            return 'Recent (6-12mo)'
-        elif days <= 730:
-            return 'Lapsed (1-2yr)'
-        else:
-            return 'Very Lapsed (2yr+)'
-    
+    all_segments = [
+        'Recent (0-6mo)',
+        'Recent (6-12mo)',
+        'Lapsed (1-2yr)',
+        'Very Lapsed (2yr+)',
+        'Prospects/New'
+    ]
+
     if 'days_since_last' in df.columns and 'gift_count' in df.columns:
-        df['segment'] = df.apply(assign_segment, axis=1)
-        all_segments = ['Recent (0-6mo)', 'Recent (6-12mo)', 'Lapsed (1-2yr)', 'Very Lapsed (2yr+)', 'Prospects/New']
-        df['segment'] = pd.Categorical(df['segment'], categories=all_segments)
+        days = pd.to_numeric(df['days_since_last'], errors='coerce')
+        gifts = pd.to_numeric(df['gift_count'], errors='coerce').fillna(0)
+
+        segments = np.full(len(df), 'Prospects/New', dtype=object)
+        valid = (gifts > 0) & days.notna()
+        within_bounds = valid & (days <= 3650)
+
+        recent_0_6_mask = within_bounds & (days <= 180)
+        recent_6_12_mask = within_bounds & (days > 180) & (days <= 365)
+        lapsed_mask = within_bounds & (days > 365) & (days <= 730)
+        very_lapsed_mask = within_bounds & (days > 730)
+
+        segments[recent_0_6_mask] = 'Recent (0-6mo)'
+        segments[recent_6_12_mask] = 'Recent (6-12mo)'
+        segments[lapsed_mask] = 'Lapsed (1-2yr)'
+        segments[very_lapsed_mask] = 'Very Lapsed (2yr+)'
+
+        df['segment'] = pd.Categorical(segments, categories=all_segments)
     else:
-        df['segment'] = 'Prospects/New'
+        df['segment'] = pd.Categorical(
+            np.full(len(df), 'Prospects/New', dtype=object),
+            categories=all_segments
+        )
     
     return df
 

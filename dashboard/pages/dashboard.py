@@ -264,72 +264,76 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                 seg_df = df_work[['segment', 'predicted_prob']].dropna(subset=['segment'])
                 if not seg_df.empty:
                     summary = seg_df.groupby('segment', observed=False).size().reset_index(name='Count')
-                    fig_segment = px.bar(summary, x='segment', y='Count', color='segment',
-                                         category_orders={'segment': ['Recent (0-6mo)', 'Recent (6-12mo)', 'Lapsed (1-2yr)', 'Very Lapsed (2yr+)', 'Prospects/New']},
-                                         color_discrete_sequence=['#4caf50', '#8bc34a', '#ffc107', '#ff5722', '#9e9e9e'])
-                    fig_segment.update_traces(texttemplate='%{y:,}', textposition='outside')
+                    category_order = ['Recent (0-6mo)', 'Recent (6-12mo)', 'Lapsed (1-2yr)', 'Very Lapsed (2yr+)', 'Prospects/New']
+                    summary['segment'] = pd.Categorical(summary['segment'], categories=category_order, ordered=True)
+                    summary = summary.sort_values('segment', ascending=True).reset_index(drop=True)
+                    fig_segment = px.bar(
+                        summary,
+                        x='Count',
+                        y='segment',
+                        orientation='h',
+                        color='segment',
+                        category_orders={'segment': category_order},
+                        color_discrete_sequence=['#4caf50', '#8bc34a', '#ffc107', '#ff5722', '#9e9e9e']
+                    )
+                    fig_segment.update_traces(
+                        texttemplate='%{x:,}',
+                        textposition='outside',
+                        cliponaxis=False
+                    )
                     max_count = summary['Count'].max()
-                    padding = max(1, max_count * 0.40) if pd.notna(max_count) else 1
+                    padding = max(1, max_count * 0.25) if pd.notna(max_count) else 1
                     fig_segment.update_layout(
                         height=350,
                         showlegend=False,
                         plot_bgcolor='rgba(0,0,0,0)',
                         paper_bgcolor='rgba(0,0,0,0)',
-                        margin=dict(t=70, b=60)
+                        margin=dict(t=70, b=40, l=120, r=40),
+                        yaxis=dict(
+                            title='Segment',
+                            autorange='reversed',
+                            categoryorder='array',
+                            categoryarray=category_order
+                        ),
+                        xaxis=dict(
+                            range=[0, max_count + padding],
+                            title='Donor Count'
+                        )
                     )
-                    fig_segment.update_yaxes(range=[0, max_count + padding], automargin=True)
                     st.plotly_chart(fig_segment, use_container_width=True)
                 else:
                     st.info("No segment data available to display.")
             else:
                 st.info("Segment or prediction columns missing from dataset.")
             st.markdown('</div>', unsafe_allow_html=True)
-            st.caption("💡 **What this means**: Shows distribution of donors across recency segments with their average 'will give again' probability. Recent segments typically score higher.")
+            st.caption("💡 **What this means**: Segments are sorted top-to-bottom from most recently engaged to prospects, letting you compare how many donors fall into each recency band at a glance.")
 
         with col2:
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown("#### 🌍 Donor Distribution by Region")
-            if 'region' in df_work.columns:
-                reg_series = df_work['region'].dropna()
-                if not reg_series.empty:
-                    summary = reg_series.value_counts().reset_index()
-                    summary.columns = ['Region', 'Count']
-                    fig_region = px.pie(summary, names='Region', values='Count', hole=0.4,
-                                        color_discrete_sequence=['#2196f3', '#4caf50', '#ff9800', '#9c27b0', '#e91e63'])
-                    fig_region.update_layout(height=350)
-                    st.plotly_chart(fig_region)
+            st.markdown("#### 🎯 Who Will Give Again in 2024 — Confidence Tiers")
+            if 'predicted_prob' in df_work.columns:
+                probs = pd.to_numeric(df_work['predicted_prob'], errors='coerce').dropna()
+                if len(probs):
+                    bins = [0.0, 0.4, 0.7, 1.0]
+                    labels = ['Low', 'Medium', 'High']
+                    tiers = pd.cut(probs, bins=bins, labels=labels, include_lowest=True)
+                    summary = tiers.value_counts().reindex(labels, fill_value=0).reset_index()
+                    summary.columns = ['Tier', 'Count']
+                    fig_tiers = px.bar(summary, x='Tier', y='Count', color='Tier',
+                                       color_discrete_map={'Low': '#f44336', 'Medium': '#ffc107', 'High': '#4caf50'})
+                    fig_tiers.update_traces(texttemplate='%{y:,}', textposition='outside')
+                    fig_tiers.update_layout(height=250, showlegend=False, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
+                    st.plotly_chart(fig_tiers, use_container_width=True)
                 else:
-                    st.info("No region data available to display.")
+                    st.info("Prediction probabilities are present but all values are NaN.")
             else:
-                st.info("Region column missing from dataset.")
+                st.info("Prediction probabilities not available.")
             st.markdown('</div>', unsafe_allow_html=True)
-            st.caption("💡 **What this means**: Geographic distribution helps prioritize regional campaigns and identify coverage gaps.")
-
-        st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-        st.markdown("#### 🎯 Who Will Give Again in 2024 — Confidence Tiers")
-        if 'predicted_prob' in df_work.columns:
-            probs = pd.to_numeric(df_work['predicted_prob'], errors='coerce').dropna()
-            if len(probs):
-                bins = [0.0, 0.4, 0.7, 1.0]
-                labels = ['Low', 'Medium', 'High']
-                tiers = pd.cut(probs, bins=bins, labels=labels, include_lowest=True)
-                summary = tiers.value_counts().reindex(labels, fill_value=0).reset_index()
-                summary.columns = ['Tier', 'Count']
-                fig_tiers = px.bar(summary, x='Tier', y='Count', color='Tier',
-                                   color_discrete_map={'Low': '#f44336', 'Medium': '#ffc107', 'High': '#4caf50'})
-                fig_tiers.update_traces(texttemplate='%{y:,}', textposition='outside')
-                fig_tiers.update_layout(height=250, showlegend=False, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                st.plotly_chart(fig_tiers)
-            else:
-                st.info("Prediction probabilities are present but all values are NaN.")
-        else:
-            st.info("Prediction probabilities not available.")
-        st.markdown('</div>', unsafe_allow_html=True)
-        st.caption("💡 **How to read**: Donors are grouped into Low/Medium/High based on predicted probability. Focus on the High-tier donors first.")
+            st.caption("💡 **How to read**: Donors are grouped into Low/Medium/High based on predicted probability. Focus on the High-tier donors first.")
 
         # Trend Analysis Section (header removed)
 
-        if 'predicted_prob' in df_filtered.columns:
+        if False:  # Section disabled per request
             col1, col2 = st.columns(2)
 
             with col1:
@@ -386,7 +390,8 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                             text=perf_ct['Mean_Prob'].apply(lambda v: f"{v:.1%}"),
                             textposition='outside',
                             customdata=np.c_[perf_ct['Count'].values, perf_ct['outcome'].values],
-                            hovertemplate=hover_tmpl + '<br>Donors: %{customdata[0]:,}<br>Gave Again Rate: %{customdata[1]:.1%}<extra></extra>'
+                            hovertemplate=hover_tmpl + '<br>Donors: %{customdata[0]:,}<br>Gave Again Rate: %{customdata[1]:.1%}<extra></extra>',
+                            showlegend=False
                         ))
                         # Overlay: Gave-again rate as a line over the bars
                         fig_ct.add_trace(go.Scatter(
@@ -407,7 +412,8 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                             text=perf_ct['Mean_Prob'].apply(lambda v: f"{v:.1%}"),
                             textposition='outside',
                             customdata=np.c_[perf_ct['Count'].values],
-                            hovertemplate=hover_tmpl + '<br>Donors: %{customdata[0]:,}<extra></extra>'
+                            hovertemplate=hover_tmpl + '<br>Donors: %{customdata[0]:,}<extra></extra>',
+                            showlegend=False
                         ))
 
                     # Y axis from 0 to max with padding, cap at 1.0
@@ -463,210 +469,6 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                     )
                     st.plotly_chart(fig_seasonal)
                     st.caption("💡 **What this means**: Giving tends to peak in Q4 (holiday season) and early Q1 (new year). Plan campaigns accordingly.")
-
-
-
-        # Model in Action Section (debug elements removed)
-        if 'predicted_prob' in df_filtered.columns:
-            high_prob_count = (df_filtered['predicted_prob'] >= 0.7).sum()
-            medium_prob_count = ((df_filtered['predicted_prob'] >= 0.4) & (df_filtered['predicted_prob'] < 0.7)).sum()
-            # Top 10 prospects
-            top_prospects = df_filtered.nlargest(10, 'predicted_prob')
-
-            if len(top_prospects) > 0 and 'donor_id' in top_prospects.columns:
-                col1, col2 = st.columns([2, 1])
-
-                with col1:
-                    st.markdown("#### 🔥 Top 10 High-Probability Prospects")
-                    display_cols = ['donor_id', 'predicted_prob']
-
-                    # Add donor name if available (check common column name variations)
-                    name_col = None
-                    for col_name in ['donor_name', 'name', 'full_name', 'Full_Name', 'Donor_Name', 'Name', 'fullname']:
-                        if col_name in top_prospects.columns:
-                            name_col = col_name
-                            display_cols.append(col_name)
-                            break
-
-                    # Add capacity rating if available (check common column name variations)
-                    capacity_col = None
-                    for col_name in ['Rating', 'rating', 'capacity_rating', 'Capacity_Rating', 'Capacity', 'capacity']:
-                        if col_name in top_prospects.columns:
-                            capacity_col = col_name
-                            display_cols.append(col_name)
-                            break
-
-                    # Add primary manager if available (check common column name variations)
-                    manager_col = None
-                    for col_name in ['Primary_Manager', 'primary_manager', 'Manager', 'manager', 'assigned_manager', 'Assigned_Manager', 'PrimaryManager']:
-                        if col_name in top_prospects.columns:
-                            manager_col = col_name
-                            display_cols.append(col_name)
-                            break
-
-                    if 'avg_gift' in top_prospects.columns:
-                        display_cols.append('avg_gift')
-                    if 'segment' in top_prospects.columns:
-                        display_cols.append('segment')
-
-                    top_display = top_prospects[display_cols].copy()
-
-                    # Rename columns for display
-                    rename_dict = {'predicted_prob': 'Probability', 'avg_gift': 'Avg Gift', 'segment': 'Segment'}
-                    if name_col:
-                        rename_dict[name_col] = 'Donor Name'
-                    if capacity_col:
-                        rename_dict[capacity_col] = 'Capacity Rating'
-                    if manager_col:
-                        rename_dict[manager_col] = 'Primary Manager'
-
-                    top_display = top_display.rename(columns=rename_dict)
-
-                    # Diagnostic: Check for suspicious 100% probabilities
-                    raw_probs = top_prospects['predicted_prob'].values
-                    exact_ones = (raw_probs == 1.0).sum()
-                    near_ones = ((raw_probs >= 0.99) & (raw_probs < 1.0)).sum()
-
-                    # Calculate accuracy for top prospects if actual_gave is available
-                    accuracy_info = ""
-                    if 'actual_gave' in top_prospects.columns:
-                        actual_outcomes = top_prospects['actual_gave'].values
-                        correct = (raw_probs >= 0.5) == (actual_outcomes == 1)
-                        accuracy_pct = correct.sum() / len(correct) * 100
-
-                        # Count false positives (predicted 1, actual 0)
-                        false_positives = ((raw_probs >= 0.5) & (actual_outcomes == 0)).sum()
-                        true_positives = ((raw_probs >= 0.5) & (actual_outcomes == 1)).sum()
-
-                        accuracy_info = f"""
-
-                        **Accuracy Analysis (Top 10):**
-                        - ✅ Correct Predictions: {correct.sum()}/10 ({accuracy_pct:.1f}%)
-                        - ❌ False Positives (predicted high, didn't give): {false_positives}
-                        - ✅ True Positives (predicted high, did give): {true_positives}
-                        """
-
-                        # Critical warning if all are 1.0 and many are wrong
-                        if exact_ones == len(top_prospects) and false_positives > 0:
-                            st.error(f"""
-                            🚨 **CRITICAL ISSUE DETECTED** 🚨
-
-                            **Problem**: ALL top prospects have exactly 100% probability, but {false_positives} out of 10 did NOT actually give ({accuracy_pct:.0f}% accuracy).
-
-                            **What This Means**:
-                            - 100% predictions should be 100% correct, but they're not
-                            - The model is severely **miscalibrated** (overconfident)
-                            - This could indicate:
-                              1. **Probability clipping**: Values are being hard-capped at 1.0
-                              2. **Model bug**: Using binary predictions instead of probabilities
-                              3. **Data preprocessing error**: Normalization/clipping in the pipeline
-                              4. **Wrong column**: Using `actual_gave` or a derived column instead of `predicted_prob`
-
-                            **Immediate Actions Required**:
-                            1. ✅ Check your model's probability output (should use softmax/sigmoid)
-                            2. ✅ Verify `predicted_prob` column contains actual probabilities, not binary predictions
-                            3. ✅ Look for `np.clip(..., 0, 1)` or similar clipping in preprocessing
-                            4. ✅ Review model training code for calibration issues
-                            5. ✅ Consider using probability calibration (IsotonicRegression, Platt scaling)
-                            """)
-                        elif exact_ones > 0:
-                            st.warning(f"⚠️ **Warning**: {exact_ones} donor(s) with exactly 100% probability. This is unusual for ML models.")
-
-
-                    # Format probability for display (show 2 decimal places for better precision)
-                    top_display['Probability'] = top_display['Probability'].apply(lambda x: f"{x:.2%}")
-                    if 'Avg Gift' in top_display.columns:
-                        top_display['Avg Gift'] = top_display['Avg Gift'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) else "N/A")
-
-                    # Convert capacity rating codes to dollar ranges if available
-                    if 'Capacity Rating' in top_display.columns:
-                        rating_to_range = {
-                            'A': '$100M+',
-                            'B': '$50M - $99.9M',
-                            'C': '$25M - $49.9M',
-                            'D': '$10M - $24.9M',
-                            'E': '$5M - $9.9M',
-                            'F': '$1M - $4.9M',
-                            'G': '$500K - $999.9K',
-                            'H': '$250K - $499.9K',
-                            'I': '$100K - $249.9K',
-                            'J': '$50K - $99.9K',
-                            'K': '$25K - $49.9K',
-                            'L': '$10K - $24.9K',
-                            'M': '$5K - $9.9K',
-                            'N': '$2.5K - $4.9K',
-                            'O': '$1K - $2.4K',
-                            'P': 'Less than $1K'
-                        }
-                        # Map rating codes to dollar ranges (case-insensitive)
-                        top_display['Capacity Rating'] = top_display['Capacity Rating'].apply(
-                            lambda x: rating_to_range.get(str(x).upper().strip(), str(x)) if pd.notna(x) and str(x).upper().strip() in rating_to_range else (str(x) if pd.notna(x) else "N/A")
-                        )
-
-                    # Reorder columns to put name, capacity, and manager near the front
-                    ordered_cols = ['donor_id']
-                    if 'Donor Name' in top_display.columns:
-                        ordered_cols.append('Donor Name')
-                    ordered_cols.append('Probability')
-                    if 'Capacity Rating' in top_display.columns:
-                        ordered_cols.append('Capacity Rating')
-                    if 'Primary Manager' in top_display.columns:
-                        ordered_cols.append('Primary Manager')
-                    for col in top_display.columns:
-                        if col not in ordered_cols:
-                            ordered_cols.append(col)
-
-                    top_display = top_display[[col for col in ordered_cols if col in top_display.columns]]
-
-                    st.dataframe(top_display, width='stretch', hide_index=True)
-
-                with col2:
-                    st.markdown("#### 📤 Export")
-                    # Create export data
-                    export_df = df_filtered.nlargest(100, 'predicted_prob').copy()
-                    export_cols = ['donor_id']
-                    if 'predicted_prob' in export_df.columns:
-                        export_cols.append('predicted_prob')
-                    if 'avg_gift' in export_df.columns:
-                        export_cols.append('avg_gift')
-                    if 'total_giving' in export_df.columns:
-                        export_cols.append('total_giving')
-                    if 'segment' in export_df.columns:
-                        export_cols.append('segment')
-
-                    export_data = export_df[export_cols].copy()
-                    export_data = export_data.rename(columns={
-                        'predicted_prob': 'Prediction_Probability',
-                        'avg_gift': 'Recommended_Ask_Amount',
-                        'total_giving': 'Lifetime_Value',
-                        'segment': 'Segment'
-                    })
-                    if 'Prediction_Probability' in export_data.columns:
-                        export_data['Contact_Priority'] = pd.cut(
-                            export_data['Prediction_Probability'],
-                            bins=[0, 0.4, 0.7, 1.0],
-                            labels=['Low', 'Medium', 'High']
-                        )
-
-                    csv = export_data.to_csv(index=False)
-                    st.download_button(
-                        label="📥 Download Top 100 Prospects",
-                        data=csv,
-                        file_name=f"top_prospects_{datetime.now().strftime('%Y%m%d')}.csv",
-                        mime="text/csv",
-                        use_container_width=True,
-                        help="Downloads CSV with donor IDs, prediction probabilities, recommended ask amounts, and contact priorities"
-                    )
-
-                    st.markdown("---")
-                    st.markdown(f"""
-                    <div style="background: #fff3cd; padding: 15px; border-radius: 8px; border-left: 4px solid #ffc107;">
-                        <h5 style="color: #856404; margin-top: 0;">🔥 Alert</h5>
-                        <p style="color: #856404; margin-bottom: 0; font-size: 14px;">
-                            <strong>{high_prob_count:,} new high-probability donors</strong> identified this week
-                        </p>
-                    </div>
-                    """, unsafe_allow_html=True)
 
         # Insights Section
         st.markdown('<div class="info-box">', unsafe_allow_html=True)
