@@ -1,6 +1,6 @@
 """
 Sidebar component for the dashboard.
-Extracted from alternate_dashboard.py for modular architecture.
+
 """
 
 import os
@@ -65,7 +65,7 @@ def render_sidebar(df) -> Tuple[str, List[str], List[str], List[str], float]:
     """
     if not STREAMLIT_AVAILABLE:
         # Return defaults if Streamlit not available (for testing)
-        return "🏠 Dashboard", [], [], [], 0.5
+        return "🏠 Executive Summary", [], [], [], 0.5
     
     # Load brand font and styles for University Advancement title
     st.sidebar.markdown("""
@@ -103,9 +103,34 @@ def render_sidebar(df) -> Tuple[str, List[str], List[str], List[str], float]:
     
     st.sidebar.markdown('<p class="filter-header">📍 Navigation</p>', unsafe_allow_html=True)
     
+    # Add CSS to left-align radio buttons
+    st.sidebar.markdown("""
+    <style>
+        /* Left-align radio buttons and labels */
+        .stRadio > div {
+            display: flex;
+            flex-direction: column;
+            align-items: flex-start !important;
+        }
+        .stRadio > div > label {
+            display: flex;
+            align-items: center;
+            justify-content: flex-start;
+            width: 100%;
+        }
+        .stRadio > div > label > div:first-child {
+            margin-right: 8px;
+            flex-shrink: 0;
+        }
+        .stRadio > div > label > div:last-child {
+            text-align: left;
+        }
+    </style>
+    """, unsafe_allow_html=True)
+    
     page = st.sidebar.radio(
         "Navigation",
-        ["🏠 Dashboard", "🔬 Model Comparison", "💰 Business Impact", "💎 Donor Insights", 
+        ["🏠 Executive Summary", "🔬 Model Comparison", "💰 Business Impact", "💎 Donor Insights", 
          "🔬 Features", "🎲 Predictions", "📈 Performance", "⚡ Take Action"],
         label_visibility="collapsed"
     )
@@ -194,4 +219,3 @@ def render_sidebar(df) -> Tuple[str, List[str], List[str], List[str], float]:
         st.sidebar.info("📋 Metrics copied to clipboard!")
     
     return page, regions, donor_types, segments, prob_threshold
-

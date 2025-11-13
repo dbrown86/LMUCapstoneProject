@@ -47,7 +47,7 @@ def main() -> None:
     page, regions, donor_types, segments, prob_threshold = render_sidebar(df)
 
     # Route to pages
-    if page == "🏠 Dashboard":
+    if page == "🏠 Executive Summary":
         render_dashboard(df, regions, donor_types, segments, prob_threshold)
     elif page == "🔬 Model Comparison":
         render_model_comparison(df)

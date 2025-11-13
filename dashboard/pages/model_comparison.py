@@ -37,7 +37,6 @@ def render(df: pd.DataFrame):
         return
     
     st.markdown('<p class="page-title">🔬 Model Performance Comparison</p>', unsafe_allow_html=True)
-    st.markdown('<p class="page-subtitle">Baseline vs. Multimodal Fusion - Actual Results</p>', unsafe_allow_html=True)
     
     # Get actual metrics from saved training or computed from data
     actual_metrics = get_model_metrics(df)
@@ -241,15 +240,25 @@ def render(df: pd.DataFrame):
                 textposition='outside',
                 hovertemplate='<b>%{x} — Baseline</b><br>%{y:.2%}<extra></extra>'
             ))
+            text_positions = []
+            fusion_text = []
+            for label, value in zip(comparison_metrics, fusion_series):
+                fusion_text.append(f"{value:.2%}")
+                if label == 'AUC':
+                    text_positions.append('outside')
+                else:
+                    text_positions.append('outside')
             fig_actual.add_trace(go.Bar(
                 name='Multimodal Fusion',
                 x=comparison_metrics,
                 y=fusion_series,
                 marker_color='#2ecc71',
-                text=[f"{value:.2%}" for value in fusion_series],
-                textposition='outside',
+                text=fusion_text,
+                textposition=text_positions,
                 hovertemplate='<b>%{x} — Fusion</b><br>%{y:.2%}<extra></extra>'
             ))
+            max_value = max(baseline_series + fusion_series) if (baseline_series or fusion_series) else 0
+            y_padding = max(0.02, max_value * 0.15)
 
             fig_actual.update_layout(
                 title='Actual Model Performance: Baseline vs. Fusion',
@@ -260,23 +269,9 @@ def render(df: pd.DataFrame):
                 plot_bgcolor='rgba(0,0,0,0)',
                 paper_bgcolor='rgba(0,0,0,0)',
                 xaxis=dict(showgrid=False),
-                yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat='.0%'),
+                yaxis=dict(showgrid=True, gridcolor='#e0e0e0', tickformat='.0%', range=[0, min(1, max_value + y_padding)]),
                 legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
             )
-
-            if 'AUC' in improvements and improvements['AUC'] is not None:
-                auc_index = comparison_metrics.index('AUC')
-                auc_peak = max(baseline_series[auc_index], fusion_series[auc_index])
-                fig_actual.add_annotation(
-                    x='AUC',
-                    y=min(1.0, auc_peak + 0.05),
-                    text=f"+{improvements['AUC']:.1f}% vs baseline",
-                    showarrow=False,
-                    font=dict(size=12, color='#27ae60'),
-                    bgcolor='rgba(255,255,255,0.9)',
-                    bordercolor='#27ae60',
-                    borderwidth=1
-                )
 
             st.plotly_chart(fig_actual, use_container_width=True)
             improvement = improvements.get('AUC')
@@ -495,3 +490,7 @@ def render(df: pd.DataFrame):
             hovermode='closest'
         )
         st.plotly_chart(fig_radar)
+        st.caption(
+            "💡 **How to read**: If the green polygon extends farther than the red shape on a given axis, the fusion model beats the baseline on that metric.",
+            unsafe_allow_html=True
+        )

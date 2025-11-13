@@ -73,6 +73,84 @@ def get_css_styles() -> str:
         border-bottom: 2px solid rgba(255,255,255,0.3);
     }
     
+    /* Prevent text wrapping in sidebar radio buttons */
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] .stRadio label span,
+    [data-testid="stSidebar"] [data-baseweb="radio"] label,
+    [data-testid="stSidebar"] [data-baseweb="radio"] label span,
+    [data-testid="stSidebar"] [data-baseweb="radio"] [class*="label"],
+    [data-testid="stSidebar"] [class*="radio"] label {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        display: inline-block !important;
+    }
+    [data-testid="stSidebar"] .stRadio,
+    [data-testid="stSidebar"] [data-baseweb="radio"] {
+        white-space: nowrap !important;
+        overflow: visible !important;
+    }
+    /* Ensure radio button items don't wrap */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div,
+    [data-testid="stSidebar"] .stRadio > div {
+        white-space: nowrap !important;
+    }
+    
+    /* Align page titles with radio buttons and remove spacing between items */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div,
+    [data-testid="stSidebar"] .stRadio > div {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    /* Align radio button labels with their indicators */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div > label,
+    [data-testid="stSidebar"] .stRadio > div > label {
+        margin: 0 !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        line-height: 1.4 !important;
+        cursor: pointer !important;
+    }
+    /* Align radio button indicator */
+    [data-testid="stSidebar"] [data-baseweb="radio"] input[type="radio"],
+    [data-testid="stSidebar"] .stRadio input[type="radio"],
+    [data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"] {
+        margin: 0 !important;
+        margin-right: 6px !important;
+        vertical-align: middle !important;
+        align-self: center !important;
+        flex-shrink: 0 !important;
+    }
+    /* Align text content next to radio button */
+    [data-testid="stSidebar"] [data-baseweb="radio"] label > span,
+    [data-testid="stSidebar"] .stRadio label > span,
+    [data-testid="stSidebar"] [data-baseweb="radio"] label > *:not(input),
+    [data-testid="stSidebar"] .stRadio label > *:not(input) {
+        vertical-align: middle !important;
+        align-self: center !important;
+        line-height: 1.4 !important;
+    }
+    /* Remove spacing between radio button rows */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div:not(:last-child),
+    [data-testid="stSidebar"] .stRadio > div:not(:last-child) {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    /* Target all radio button containers in sidebar */
+    [data-testid="stSidebar"] [data-baseweb="radio"] {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    [data-testid="stSidebar"] .stRadio {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;

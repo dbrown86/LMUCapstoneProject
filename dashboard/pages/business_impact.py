@@ -707,8 +707,9 @@ def render(df: pd.DataFrame, prob_threshold: float):
 
                         # Display formatted
                         display_df = categories_df[['Category', 'Count', 'Avg Probability', 'Avg Gift', 'Estimated Revenue', 'Description']].copy()
+                        display_df = display_df.rename(columns={'Avg Gift': 'Median Last Gift'})
                         display_df['Avg Probability'] = display_df['Avg Probability'].apply(lambda x: f"{x:.1%}")
-                        display_df['Avg Gift'] = display_df['Avg Gift'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
+                        display_df['Median Last Gift'] = display_df['Median Last Gift'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
                         display_df['Estimated Revenue'] = display_df['Estimated Revenue'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
 
                         st.dataframe(display_df, width='stretch', hide_index=True)
