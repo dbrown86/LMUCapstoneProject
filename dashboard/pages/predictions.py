@@ -16,7 +16,20 @@ except ImportError:
     STREAMLIT_AVAILABLE = False
     st = None
 
-# No external imports needed for this page
+# Import chart wrapper (with fallback)
+try:
+    from dashboard.components.charts import plotly_chart_silent
+except ImportError:
+    # Fallback: use st.plotly_chart directly with config (filter kwargs)
+    def plotly_chart_silent(fig, width='stretch', config=None, **kwargs):
+        if config is None:
+            config = {'displayModeBar': True, 'displaylogo': False}
+        if STREAMLIT_AVAILABLE:
+            # Filter to only recognized parameters to avoid deprecation warnings
+            recognized = {'theme', 'key', 'on_select', 'selection_mode'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in recognized}
+            return st.plotly_chart(fig, width=width, config=config, **filtered_kwargs)
+        return None
 
 
 def render(df: pd.DataFrame):
@@ -83,7 +96,7 @@ def render(df: pd.DataFrame):
                 ))
                 
                 fig.update_layout(height=300)
-                st.plotly_chart(fig)
+                plotly_chart_silent(fig, config={'displayModeBar': True, 'displaylogo': False})
                 
                 confidence = "HIGH" if predicted_prob >= 0.7 else "MEDIUM" if predicted_prob >= 0.4 else "LOW"
                 

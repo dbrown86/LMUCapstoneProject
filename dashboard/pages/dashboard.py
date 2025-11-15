@@ -37,6 +37,21 @@ except ImportError:
     def get_segment_stats(df, use_cache=True):
         return pd.DataFrame()
 
+# Import chart wrapper (separate try/except to ensure it's always available)
+try:
+    from dashboard.components.charts import plotly_chart_silent
+except ImportError:
+    # Fallback: use st.plotly_chart directly with config (filter kwargs)
+    def plotly_chart_silent(fig, width='stretch', config=None, **kwargs):
+        if config is None:
+            config = {'displayModeBar': True, 'displaylogo': False}
+        if STREAMLIT_AVAILABLE:
+            # Filter to only recognized parameters to avoid deprecation warnings
+            recognized = {'theme', 'key', 'on_select', 'selection_mode'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in recognized}
+            return st.plotly_chart(fig, width=width, config=config, **filtered_kwargs)
+        return None
+
 
 def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segments: List[str], prob_threshold: float):
     """
@@ -335,7 +350,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                             ),
                             font=dict(family="Arial, sans-serif", color='white')
                         )
-                        st.plotly_chart(fig_segment, use_container_width=True)
+                        plotly_chart_silent(fig_segment, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
                     else:
                         st.info("No donor segment data available (excluding Prospects/New).")
                 else:
@@ -368,7 +383,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                     paper_bgcolor='rgba(0,0,0,0)',
                     yaxis=dict(range=[0, max_tier_count + tier_padding] if pd.notna(max_tier_count) else None)
                 )
-                st.plotly_chart(fig_tiers, use_container_width=True)
+                plotly_chart_silent(fig_tiers, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
             else:
                 st.info("Prediction probabilities are present but all values are NaN.")
         else:
@@ -479,7 +494,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                         margin=dict(t=60, b=80, l=50, r=50),
                         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
                     )
-                    st.plotly_chart(fig_ct)
+                    plotly_chart_silent(fig_ct, config={'displayModeBar': True, 'displaylogo': False})
                     st.caption("💡 **What this means**: Shows average 'will give again in 2024' prediction by constituency type. Where shown, the hover also includes the actual gave-again rate from outcomes.")
                 else:
                     st.info("Constituency type or prediction probabilities not available to render this chart.")
@@ -515,7 +530,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                         line_color="gray",
                         annotation_text="Average"
                     )
-                    st.plotly_chart(fig_seasonal)
+                    plotly_chart_silent(fig_seasonal, config={'displayModeBar': True, 'displaylogo': False})
                     st.caption("💡 **What this means**: Giving tends to peak in Q4 (holiday season) and early Q1 (new year). Plan campaigns accordingly.")
 
         # Gift Officer Assignment Section
@@ -652,7 +667,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                         ),
                         font=dict(family="Arial, sans-serif")
                     )
-                    st.plotly_chart(fig_officer, use_container_width=True)
+                    plotly_chart_silent(fig_officer, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
                     st.caption("💡 **How to read**: Quality Score combines median Will Give Again probability (60% weight) and recent giving activity (40% weight). Scores ≥70 = High quality (green), 50-69 = Medium (orange), <50 = Low (red). Officers are ranked from highest to lowest quality.")
                 else:
                     missing = []

@@ -25,6 +25,21 @@ except ImportError:
     def try_load_saved_metrics():
         return None
 
+# Import chart wrapper (with fallback)
+try:
+    from dashboard.components.charts import plotly_chart_silent
+except ImportError:
+    # Fallback: use st.plotly_chart directly with config (filter kwargs)
+    def plotly_chart_silent(fig, width='stretch', config=None, **kwargs):
+        if config is None:
+            config = {'displayModeBar': True, 'displaylogo': False}
+        if STREAMLIT_AVAILABLE:
+            # Filter to only recognized parameters to avoid deprecation warnings
+            recognized = {'theme', 'key', 'on_select', 'selection_mode'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in recognized}
+            return st.plotly_chart(fig, width=width, config=config, **filtered_kwargs)
+        return None
+
 
 def render(df: pd.DataFrame):
     """
@@ -273,7 +288,7 @@ def render(df: pd.DataFrame):
                 legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
             )
 
-            st.plotly_chart(fig_actual, use_container_width=True)
+            plotly_chart_silent(fig_actual, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
             improvement = improvements.get('AUC')
     
     with col2:
@@ -489,7 +504,7 @@ def render(df: pd.DataFrame):
             margin=dict(l=50, r=50, t=80, b=50),
             hovermode='closest'
         )
-        st.plotly_chart(fig_radar)
+        plotly_chart_silent(fig_radar, config={'displayModeBar': True, 'displaylogo': False})
         st.caption(
             "💡 **How to read**: If the green polygon extends farther than the red shape on a given axis, the fusion model beats the baseline on that metric.",
             unsafe_allow_html=True

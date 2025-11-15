@@ -7,6 +7,7 @@ import pandas as pd
 import numpy as np
 import os
 import json
+import re
 from pathlib import Path
 from typing import Optional, Dict, Any
 
@@ -265,10 +266,47 @@ def _get_feature_importance_internal(df: pd.DataFrame) -> pd.DataFrame:
     
     if outcome_col:
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
-        # Remove target, ID, and prediction columns (these are outputs, not features)
-        exclude_cols = [outcome_col, 'actual_gave', 'donor_id', 'Will_Give_Again_Probability', 
-                       'predicted_prob', 'Legacy_Intent_Probability']
-        feature_cols = [c for c in numeric_cols if c not in exclude_cols]
+        
+        # Define prediction column patterns to exclude (outputs, not features)
+        # These include base names and common merge suffixes (_x, _y, etc.)
+        prediction_patterns = [
+            'Will_Give_Again_Probability',
+            'predicted_prob',
+            'Legacy_Intent_Probability',
+            'predicted_probability'
+        ]
+        
+        # Base exclusion list
+        exclude_cols_base = [outcome_col, 'actual_gave', 'donor_id', 'ID', 'id']
+        
+        # Function to check if a column should be excluded
+        def should_exclude_col(col_name):
+            # Check exact matches first
+            if col_name in exclude_cols_base:
+                return True
+            
+            # Check if column name matches prediction patterns (including merge suffixes)
+            # This catches variants like 'Will_Give_Again_Probability_x', 'predicted_prob_y', etc.
+            col_lower = col_name.lower()
+            for pattern in prediction_patterns:
+                pattern_lower = pattern.lower()
+                # Exact match
+                if col_lower == pattern_lower:
+                    return True
+                # Column starts with pattern followed by underscore (common merge pattern: _x, _y, etc.)
+                if col_lower.startswith(pattern_lower + '_'):
+                    return True
+                # Column name contains pattern as a complete word (handles cases where pattern is in the name)
+                # This catches 'Will_Give_Again_Probability_x' where pattern is at the start
+                # Match pattern at start of string or after underscore, followed by underscore or end of string
+                pattern_regex = re.escape(pattern_lower)
+                if re.search(r'(^|_)' + pattern_regex + r'(_|$)', col_lower):
+                    return True
+            
+            return False
+        
+        # Filter out prediction columns and other excluded columns
+        feature_cols = [c for c in numeric_cols if not should_exclude_col(c)]
         
         importance_scores = []
         feature_names = []
@@ -287,23 +325,40 @@ def _get_feature_importance_internal(df: pd.DataFrame) -> pd.DataFrame:
                 
                 feature_series = pd.to_numeric(col_series, errors='coerce')
                 
-                # Calculate correlation only if both series have valid data
-                if len(feature_series.dropna()) > 10 and len(outcome_series.dropna()) > 10:
-                    corr = abs(feature_series.corr(outcome_series))
-                    if not np.isnan(corr):
-                        importance_scores.append(corr)
-                        feature_names.append(col)
-            except (ValueError, TypeError):
+                # Align both series and drop NaN values from both simultaneously
+                # This ensures correlation is calculated on properly aligned data
+                aligned_data = pd.DataFrame({
+                    'feature': feature_series,
+                    'outcome': outcome_series
+                }).dropna()
+                
+                # Calculate correlation only if we have enough valid aligned data points
+                if len(aligned_data) > 10:
+                    # Check for constant features (zero variance) which would cause NaN correlation
+                    feature_values = aligned_data['feature'].values
+                    if len(np.unique(feature_values)) > 1:  # Feature has variance
+                        corr = abs(aligned_data['feature'].corr(aligned_data['outcome']))
+                        if not np.isnan(corr) and np.isfinite(corr):
+                            importance_scores.append(corr)
+                            feature_names.append(col)
+            except (ValueError, TypeError, KeyError):
                 pass
         
         if len(feature_names) > 0:
-            # Sort by importance
-            sorted_indices = np.argsort(importance_scores)[::-1][:15]  # Top 15
-            
-            return pd.DataFrame({
-                'feature': [feature_names[i] for i in sorted_indices],
-                'importance': [importance_scores[i] for i in sorted_indices]
+            # Create dataframe and remove duplicates (keep first occurrence with highest importance)
+            importance_df = pd.DataFrame({
+                'feature': feature_names,
+                'importance': importance_scores
             })
+            
+            # Remove duplicate features, keeping the one with highest importance
+            importance_df = importance_df.sort_values('importance', ascending=False)
+            importance_df = importance_df.drop_duplicates(subset='feature', keep='first')
+            
+            # Sort by importance and take top 15
+            importance_df = importance_df.sort_values('importance', ascending=False).head(15)
+            
+            return importance_df.reset_index(drop=True)
     
     # Fallback: return default features (should rarely be used)
     features = [
