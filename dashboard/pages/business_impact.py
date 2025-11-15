@@ -25,6 +25,21 @@ except ImportError:
     def try_load_saved_metrics():
         return None
 
+# Import chart wrapper (with fallback)
+try:
+    from dashboard.components.charts import plotly_chart_silent
+except ImportError:
+    # Fallback: use st.plotly_chart directly with config (filter kwargs)
+    def plotly_chart_silent(fig, width='stretch', config=None, **kwargs):
+        if config is None:
+            config = {'displayModeBar': True, 'displaylogo': False}
+        if STREAMLIT_AVAILABLE:
+            # Filter to only recognized parameters to avoid deprecation warnings
+            recognized = {'theme', 'key', 'on_select', 'selection_mode'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in recognized}
+            return st.plotly_chart(fig, width=width, config=config, **filtered_kwargs)
+        return None
+
 
 def render(df: pd.DataFrame, prob_threshold: float):
     """
@@ -476,7 +491,7 @@ def render(df: pd.DataFrame, prob_threshold: float):
                 }
 
                 comparison_df = pd.DataFrame(comparison_data)
-                st.dataframe(comparison_df, width='stretch', hide_index=True, use_container_width=True)
+                st.dataframe(comparison_df, width='stretch', hide_index=True)
 
                 # Visualization
                 st.markdown("### 📈 Revenue Comparison")
@@ -501,7 +516,7 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         height=400,
                         showlegend=False
                     )
-                    st.plotly_chart(fig_revenue)
+                    plotly_chart_silent(fig_revenue, config={'displayModeBar': True, 'displaylogo': False})
 
                 with col2:
                     # Format ROI percentages with commas if 1000 or higher
@@ -528,7 +543,7 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         height=400,
                         showlegend=False
                     )
-                    st.plotly_chart(fig_roi)
+                    plotly_chart_silent(fig_roi, config={'displayModeBar': True, 'displaylogo': False})
 
                 # Chart explanation below the charts
                 st.markdown(f"""
@@ -707,8 +722,9 @@ def render(df: pd.DataFrame, prob_threshold: float):
 
                         # Display formatted
                         display_df = categories_df[['Category', 'Count', 'Avg Probability', 'Avg Gift', 'Estimated Revenue', 'Description']].copy()
+                        display_df = display_df.rename(columns={'Avg Gift': 'Median Last Gift'})
                         display_df['Avg Probability'] = display_df['Avg Probability'].apply(lambda x: f"{x:.1%}")
-                        display_df['Avg Gift'] = display_df['Avg Gift'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
+                        display_df['Median Last Gift'] = display_df['Median Last Gift'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
                         display_df['Estimated Revenue'] = display_df['Estimated Revenue'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
 
                         st.dataframe(display_df, width='stretch', hide_index=True)
@@ -729,6 +745,6 @@ def render(df: pd.DataFrame, prob_threshold: float):
                             yaxis=dict(range=[0, max_revenue * 1.2]),  # Add 20% padding above max value for labels
                             height=400
                         )
-                        st.plotly_chart(fig_cat)
+                        plotly_chart_silent(fig_cat, config={'displayModeBar': True, 'displaylogo': False})
     else:
         st.info("Business impact calculations require prediction and financial data.")

@@ -26,6 +26,21 @@ except ImportError:
     def try_load_saved_metrics():
         return None
 
+# Import chart wrapper (with fallback)
+try:
+    from dashboard.components.charts import plotly_chart_silent
+except ImportError:
+    # Fallback: use st.plotly_chart directly with config (filter kwargs)
+    def plotly_chart_silent(fig, width='stretch', config=None, **kwargs):
+        if config is None:
+            config = {'displayModeBar': True, 'displaylogo': False}
+        if STREAMLIT_AVAILABLE:
+            # Filter to only recognized parameters to avoid deprecation warnings
+            recognized = {'theme', 'key', 'on_select', 'selection_mode'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in recognized}
+            return st.plotly_chart(fig, width=width, config=config, **filtered_kwargs)
+        return None
+
 
 def render(df: pd.DataFrame):
     """
@@ -167,7 +182,7 @@ def render(df: pd.DataFrame):
                 xaxis=dict(showgrid=True, gridcolor='#e0e0e0'),
                 yaxis=dict(showgrid=True, gridcolor='#e0e0e0')
             )
-            st.plotly_chart(fig)
+            plotly_chart_silent(fig, config={'displayModeBar': True, 'displaylogo': False})
         st.markdown('</div>', unsafe_allow_html=True)
     else:
         st.info("ROC curve requires 'actual_gave' and 'predicted_prob' columns in the dataset")
@@ -209,7 +224,7 @@ def render(df: pd.DataFrame):
                         plot_bgcolor='rgba(0,0,0,0)',
                         paper_bgcolor='rgba(0,0,0,0)'
                     )
-                    st.plotly_chart(fig_pr)
+                    plotly_chart_silent(fig_pr, config={'displayModeBar': True, 'displaylogo': False})
                     st.caption("💡 **What this means**: This curve shows the trade-off between precision and recall at different thresholds. Higher area under the curve is better.")
         except Exception as e:
             st.warning(f"Could not render PR curve: {e}")
@@ -237,7 +252,7 @@ def render(df: pd.DataFrame):
                     colorscale='Blues'
                 ))
                 fig_cm.update_layout(title='Confusion Matrix', height=400)
-                st.plotly_chart(fig_cm)
+                plotly_chart_silent(fig_cm, config={'displayModeBar': True, 'displaylogo': False})
         else:
             st.info("Confusion matrix requires 'actual_gave' and 'predicted_prob' columns.")
     except Exception as e:

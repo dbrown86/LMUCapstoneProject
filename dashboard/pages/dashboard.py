@@ -37,6 +37,21 @@ except ImportError:
     def get_segment_stats(df, use_cache=True):
         return pd.DataFrame()
 
+# Import chart wrapper (separate try/except to ensure it's always available)
+try:
+    from dashboard.components.charts import plotly_chart_silent
+except ImportError:
+    # Fallback: use st.plotly_chart directly with config (filter kwargs)
+    def plotly_chart_silent(fig, width='stretch', config=None, **kwargs):
+        if config is None:
+            config = {'displayModeBar': True, 'displaylogo': False}
+        if STREAMLIT_AVAILABLE:
+            # Filter to only recognized parameters to avoid deprecation warnings
+            recognized = {'theme', 'key', 'on_select', 'selection_mode'}
+            filtered_kwargs = {k: v for k, v in kwargs.items() if k in recognized}
+            return st.plotly_chart(fig, width=width, config=config, **filtered_kwargs)
+        return None
+
 
 def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segments: List[str], prob_threshold: float):
     """
@@ -59,7 +74,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                                         tuple(segments) if segments else ())
 
         # Page header
-        st.markdown('<p class="page-title">🏠 Executive Dashboard</p>', unsafe_allow_html=True)
+        st.markdown('<p class="page-title">🏠 Executive Summary</p>', unsafe_allow_html=True)
         st.markdown('<p class="page-subtitle">Real-time donor analytics and predictions</p>', unsafe_allow_html=True)
 
         # Executive Summary Card
@@ -259,77 +274,125 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
 
         with col1:
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown("#### 📈 Donor Distribution by Segment (Based on Fusion Model Predictions)")
+            st.markdown("#### 📊 Donor Base Breakdown: Recent to Lapsed Engagement")
             if {'segment', 'predicted_prob'}.issubset(df_work.columns):
                 seg_df = df_work[['segment', 'predicted_prob']].dropna(subset=['segment'])
                 if not seg_df.empty:
-                    summary = seg_df.groupby('segment', observed=False).size().reset_index(name='Count')
-                    category_order = ['Recent (0-6mo)', 'Recent (6-12mo)', 'Lapsed (1-2yr)', 'Very Lapsed (2yr+)', 'Prospects/New']
-                    summary['segment'] = pd.Categorical(summary['segment'], categories=category_order, ordered=True)
-                    summary = summary.sort_values('segment', ascending=True).reset_index(drop=True)
-                    fig_segment = px.bar(
-                        summary,
-                        x='Count',
-                        y='segment',
-                        orientation='h',
-                        color='segment',
-                        category_orders={'segment': category_order},
-                        color_discrete_sequence=['#4caf50', '#8bc34a', '#ffc107', '#ff5722', '#9e9e9e']
-                    )
-                    fig_segment.update_traces(
-                        texttemplate='%{x:,}',
-                        textposition='outside',
-                        cliponaxis=False
-                    )
-                    max_count = summary['Count'].max()
-                    padding = max(1, max_count * 0.25) if pd.notna(max_count) else 1
-                    fig_segment.update_layout(
-                        height=350,
-                        showlegend=False,
-                        plot_bgcolor='rgba(0,0,0,0)',
-                        paper_bgcolor='rgba(0,0,0,0)',
-                        margin=dict(t=70, b=40, l=120, r=40),
-                        yaxis=dict(
-                            title='Segment',
-                            autorange='reversed',
-                            categoryorder='array',
-                            categoryarray=category_order
-                        ),
-                        xaxis=dict(
-                            range=[0, max_count + padding],
-                            title='Donor Count'
+                    # Filter out Prospects/New category
+                    seg_df_filtered = seg_df[seg_df['segment'] != 'Prospects/New'].copy()
+                    
+                    if not seg_df_filtered.empty:
+                        summary = seg_df_filtered.groupby('segment', observed=False).agg(
+                            Count=('segment', 'size'),
+                            Avg_Prob=('predicted_prob', 'mean')
+                        ).reset_index()
+                        
+                        # Calculate percentages
+                        total_donors = summary['Count'].sum()
+                        summary['Percentage'] = (summary['Count'] / total_donors * 100).round(1)
+                        
+                        category_order = ['Recent (0-6mo)', 'Recent (6-12mo)', 'Lapsed (1-2yr)', 'Very Lapsed (2yr+)']
+                        summary['segment'] = pd.Categorical(summary['segment'], categories=category_order, ordered=True)
+                        summary = summary.sort_values('segment', ascending=True).reset_index(drop=True)
+                        
+                        # Create figure with gradient colors
+                        fig_segment = go.Figure()
+                        
+                        # Color gradient from green (recent) to red (lapsed)
+                        colors = ['#2e7d32', '#66bb6a', '#ffa726', '#ef5350']
+                        
+                        for pos, (_, row) in enumerate(summary.iterrows()):
+                            fig_segment.add_trace(go.Bar(
+                                x=[row['Count']],
+                                y=[row['segment']],
+                                orientation='h',
+                                name=row['segment'],
+                                marker=dict(
+                                    color=colors[pos] if pos < len(colors) else '#757575',
+                                    line=dict(width=0)
+                                ),
+                                text=f"{row['Count']:,} ({row['Percentage']:.1f}%)",
+                                textposition='outside',
+                                textfont=dict(size=12, color='white', weight='bold'),
+                                hovertemplate=(
+                                    f"<b>{row['segment']}</b><br>" +
+                                    f"Count: {row['Count']:,}<br>" +
+                                    f"Percentage: {row['Percentage']:.1f}%<br>" +
+                                    f"Avg Probability: {row['Avg_Prob']:.1%}<br>" +
+                                    "<extra></extra>"
+                                ),
+                                showlegend=False
+                            ))
+                        
+                        max_count = summary['Count'].max()
+                        padding = max(1, max_count * 0.3) if pd.notna(max_count) else 1
+                        
+                        fig_segment.update_layout(
+                            height=380,
+                            plot_bgcolor='rgba(0,0,0,0)',
+                            paper_bgcolor='rgba(0,0,0,0)',
+                            margin=dict(t=20, b=40, l=140, r=80),
+                            yaxis=dict(
+                                title='',
+                                autorange='reversed',
+                                categoryorder='array',
+                                categoryarray=category_order,
+                                tickfont=dict(size=11, color='white'),
+                                showgrid=False
+                            ),
+                            xaxis=dict(
+                                range=[0, max_count + padding],
+                                title=dict(text='Number of Donors', font=dict(size=12, color='white')),
+                                tickfont=dict(size=11, color='white'),
+                                showgrid=True,
+                                gridcolor='rgba(200,200,200,0.3)',
+                                gridwidth=1
+                            ),
+                            font=dict(family="Arial, sans-serif", color='white')
                         )
-                    )
-                    st.plotly_chart(fig_segment, use_container_width=True)
+                        plotly_chart_silent(fig_segment, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
+                    else:
+                        st.info("No donor segment data available (excluding Prospects/New).")
                 else:
                     st.info("No segment data available to display.")
             else:
                 st.info("Segment or prediction columns missing from dataset.")
             st.markdown('</div>', unsafe_allow_html=True)
-            st.caption("💡 **What this means**: Segments are sorted top-to-bottom from most recently engaged to prospects, letting you compare how many donors fall into each recency band at a glance.")
+            st.caption("💡 **Strategic View**: Your donor base flows from engaged (green) to at-risk (orange/red). Focus retention efforts on the yellow/orange bands before they turn red. *Note: This chart excludes 464K non-donors (Prospects/New category).*")
 
         with col2:
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown("#### 🎯 Who Will Give Again in 2024 — Confidence Tiers")
-            if 'predicted_prob' in df_work.columns:
-                probs = pd.to_numeric(df_work['predicted_prob'], errors='coerce').dropna()
-                if len(probs):
-                    bins = [0.0, 0.4, 0.7, 1.0]
-                    labels = ['Low', 'Medium', 'High']
-                    tiers = pd.cut(probs, bins=bins, labels=labels, include_lowest=True)
-                    summary = tiers.value_counts().reindex(labels, fill_value=0).reset_index()
-                    summary.columns = ['Tier', 'Count']
-                    fig_tiers = px.bar(summary, x='Tier', y='Count', color='Tier',
-                                       color_discrete_map={'Low': '#f44336', 'Medium': '#ffc107', 'High': '#4caf50'})
-                    fig_tiers.update_traces(texttemplate='%{y:,}', textposition='outside')
-                    fig_tiers.update_layout(height=250, showlegend=False, plot_bgcolor='rgba(0,0,0,0)', paper_bgcolor='rgba(0,0,0,0)')
-                    st.plotly_chart(fig_tiers, use_container_width=True)
-                else:
-                    st.info("Prediction probabilities are present but all values are NaN.")
+            st.markdown("#### 🎯 Donors Predicted to Give Again")
+        if 'predicted_prob' in df_work.columns:
+            probs = pd.to_numeric(df_work['predicted_prob'], errors='coerce').dropna()
+            if len(probs):
+                bins = [0.0, 0.4, 0.7, 1.0]
+                labels = ['Low', 'Medium', 'High']
+                tiers = pd.cut(probs, bins=bins, labels=labels, include_lowest=True)
+                summary = tiers.value_counts().reindex(labels, fill_value=0).reset_index()
+                summary.columns = ['Tier', 'Count']
+                fig_tiers = px.bar(summary, x='Tier', y='Count', color='Tier',
+                                   color_discrete_map={'Low': '#f44336', 'Medium': '#ffc107', 'High': '#4caf50'})
+                fig_tiers.update_traces(texttemplate='%{y:,}', textposition='outside')
+                max_tier_count = summary['Count'].max()
+                tier_padding = max(1, max_tier_count * 0.25) if pd.notna(max_tier_count) else 1
+                fig_tiers.update_layout(
+                    height=250,
+                    showlegend=False,
+                    plot_bgcolor='rgba(0,0,0,0)',
+                    paper_bgcolor='rgba(0,0,0,0)',
+                    yaxis=dict(range=[0, max_tier_count + tier_padding] if pd.notna(max_tier_count) else None)
+                )
+                plotly_chart_silent(fig_tiers, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
             else:
-                st.info("Prediction probabilities not available.")
-            st.markdown('</div>', unsafe_allow_html=True)
-            st.caption("💡 **How to read**: Donors are grouped into Low/Medium/High based on predicted probability. Focus on the High-tier donors first.")
+                st.info("Prediction probabilities are present but all values are NaN.")
+        else:
+            st.info("Prediction probabilities not available.")
+        st.markdown('</div>', unsafe_allow_html=True)
+        st.caption(
+            "💡 **How to read**: Donors are grouped into Low/Medium/High based on predicted probability. Focus on the High-tier donors first.",
+            unsafe_allow_html=True
+        )
 
         # Trend Analysis Section (header removed)
 
@@ -431,7 +494,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                         margin=dict(t=60, b=80, l=50, r=50),
                         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
                     )
-                    st.plotly_chart(fig_ct)
+                    plotly_chart_silent(fig_ct, config={'displayModeBar': True, 'displaylogo': False})
                     st.caption("💡 **What this means**: Shows average 'will give again in 2024' prediction by constituency type. Where shown, the hover also includes the actual gave-again rate from outcomes.")
                 else:
                     st.info("Constituency type or prediction probabilities not available to render this chart.")
@@ -467,8 +530,367 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                         line_color="gray",
                         annotation_text="Average"
                     )
-                    st.plotly_chart(fig_seasonal)
+                    plotly_chart_silent(fig_seasonal, config={'displayModeBar': True, 'displaylogo': False})
                     st.caption("💡 **What this means**: Giving tends to peak in Q4 (holiday season) and early Q1 (new year). Plan campaigns accordingly.")
+
+        # Gift Officer Assignment Section
+        st.markdown("---")
+        st.markdown("### 👥 Gift Officer Assignments & Unassigned Prospects")
+        
+        # Check if Primary_Manager column exists
+        if 'Primary_Manager' in df_work.columns:
+            col1, col2 = st.columns(2)
+
+            with col1:
+                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                st.markdown("#### 📊 Portfolio Quality by Gift Officer")
+                
+                # Filter assigned donors (exclude null and empty)
+                # Primary_Manager now contains only the correct 100-150 assignments per officer
+                assigned_df = df_work[
+                    df_work['Primary_Manager'].notna() & 
+                    (df_work['Primary_Manager'] != '')
+                ].copy()
+                
+                # Get probability column - use only Will_Give_Again_Probability
+                prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in assigned_df.columns else None
+                
+                # Get recency column
+                recency_col = None
+                for col in ['days_since_last_gift', 'days_since_last', 'Days_Since_Last_Gift']:
+                    if col in assigned_df.columns:
+                        recency_col = col
+                        break
+
+                if not assigned_df.empty and prob_col:
+                    # Calculate recency using Last_Gift_Date if available, otherwise use days_since_last_gift
+                    if 'Last_Gift_Date' in assigned_df.columns:
+                        # Convert Last_Gift_Date to datetime
+                        assigned_df['Last_Gift_Date'] = pd.to_datetime(assigned_df['Last_Gift_Date'], errors='coerce')
+                        # Calculate days since last gift
+                        today = pd.Timestamp.now()
+                        assigned_df['Days_Since_Last'] = (today - assigned_df['Last_Gift_Date']).dt.days
+                    elif recency_col:
+                        assigned_df['Days_Since_Last'] = pd.to_numeric(assigned_df[recency_col], errors='coerce')
+                    else:
+                        assigned_df['Days_Since_Last'] = None
+                    
+                    # Group by gift officer and calculate metrics
+                    if assigned_df['Days_Since_Last'].notna().any():
+                        officer_stats = assigned_df.groupby('Primary_Manager', observed=False).agg(
+                            Median_Probability=(prob_col, 'median'),
+                            Pct_Recent_12mo=('Days_Since_Last', lambda x: (x <= 365).sum() / len(x) if len(x) > 0 else 0),
+                            Avg_Days_Since_Last=('Days_Since_Last', 'mean')
+                        ).reset_index()
+                    else:
+                        officer_stats = assigned_df.groupby('Primary_Manager', observed=False).agg(
+                            Median_Probability=(prob_col, 'median')
+                        ).reset_index()
+                        officer_stats['Pct_Recent_12mo'] = 0
+                        officer_stats['Avg_Days_Since_Last'] = None
+                    
+                    # Convert to numeric
+                    officer_stats['Median_Probability'] = pd.to_numeric(officer_stats['Median_Probability'], errors='coerce')
+                    officer_stats['Pct_Recent_12mo'] = pd.to_numeric(officer_stats['Pct_Recent_12mo'], errors='coerce')
+                    
+                    # Calculate Composite Quality Score (weighted average: 60% probability, 40% recency)
+                    # Both metrics are on 0-1 scale, so we can combine them directly
+                    officer_stats['Quality_Score'] = (
+                        officer_stats['Median_Probability'] * 0.6 + 
+                        officer_stats['Pct_Recent_12mo'] * 0.4
+                    ) * 100  # Scale to 0-100
+                    
+                    # Sort by quality score (descending) for ranking
+                    officer_stats = officer_stats.sort_values('Quality_Score', ascending=False).reset_index(drop=True)
+                    
+                    # Create horizontal bar chart showing quality score
+                    fig_officer = go.Figure()
+                    
+                    # Color bars based on quality score (green for high, yellow for medium, orange for low)
+                    colors = []
+                    for score in officer_stats['Quality_Score']:
+                        if score >= 70:
+                            colors.append('#2ecc71')  # Green - High quality
+                        elif score >= 50:
+                            colors.append('#f39c12')  # Orange - Medium quality
+                        else:
+                            colors.append('#e74c3c')  # Red - Low quality
+                    
+                    # Prepare customdata with all metrics
+                    customdata_list = list(zip(
+                        officer_stats['Primary_Manager'],
+                        officer_stats['Median_Probability'],
+                        officer_stats['Pct_Recent_12mo'],
+                        officer_stats['Avg_Days_Since_Last'] if officer_stats['Avg_Days_Since_Last'].notna().any() else [0] * len(officer_stats)
+                    ))
+                    
+                    fig_officer.add_trace(go.Bar(
+                        x=officer_stats['Quality_Score'],
+                        y=officer_stats['Primary_Manager'],
+                        orientation='h',
+                        marker=dict(
+                            color=colors,
+                            line=dict(width=1, color='white')
+                        ),
+                        text=[f"{score:.1f}" for score in officer_stats['Quality_Score']],
+                        textposition='outside',
+                        textfont=dict(size=13, color='white'),
+                        hovertemplate=(
+                            "<b>%{customdata[0]}</b><br>" +
+                            "Quality Score: %{x:.1f}/100<br>" +
+                            "Median Will Give Again Probability: %{customdata[1]:.1%}<br>" +
+                            "% Donors Who Gave in Last 12 Months: %{customdata[2]:.1%}<br>" +
+                            "Avg Days Since Last Gift: %{customdata[3]:.0f} days<br>" +
+                            "<extra></extra>"
+                        ),
+                        customdata=customdata_list
+                    ))
+                    
+                    max_score = officer_stats['Quality_Score'].max()
+                    padding = max(5, max_score * 0.1)
+                    
+                    fig_officer.update_layout(
+                        height=max(500, len(officer_stats) * 40),
+                        plot_bgcolor='rgba(0,0,0,0)',
+                        paper_bgcolor='rgba(0,0,0,0)',
+                        margin=dict(t=40, b=40, l=180, r=80),
+                        xaxis=dict(
+                            title='Portfolio Quality Score (0-100)',
+                            range=[0, max_score + padding],
+                            showgrid=True,
+                            gridcolor='rgba(200,200,200,0.3)'
+                        ),
+                        yaxis=dict(
+                            title='Gift Officer',
+                            autorange='reversed',
+                            showgrid=False
+                        ),
+                        font=dict(family="Arial, sans-serif")
+                    )
+                    plotly_chart_silent(fig_officer, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
+                    st.caption("💡 **How to read**: Quality Score combines median Will Give Again probability (60% weight) and recent giving activity (40% weight). Scores ≥70 = High quality (green), 50-69 = Medium (orange), <50 = Low (red). Officers are ranked from highest to lowest quality.")
+                else:
+                    missing = []
+                    if not prob_col:
+                        missing.append("Will_Give_Again_Probability")
+                    st.info(f"Required columns not available. Missing: {', '.join(missing)}.")
+                st.markdown('</div>', unsafe_allow_html=True)
+            
+            with col2:
+                st.markdown('<div class="chart-container">', unsafe_allow_html=True)
+                st.markdown("#### 🎯 Top Quartile Unassigned Prospects: Priority Matrix")
+                
+                # Filter unassigned donors
+                unassigned_df = df_work[
+                    (df_work['Primary_Manager'].isna()) | 
+                    (df_work['Primary_Manager'] == '')
+                ].copy()
+                
+                # Get probability column - use only Will_Give_Again_Probability
+                prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in unassigned_df.columns else None
+                
+                # Get lifetime giving column (check for alternatives)
+                giving_col = None
+                for col in ['total_giving', 'Lifetime_Giving', 'LifetimeGiving', 'Lifetime Giving']:
+                    if col in unassigned_df.columns:
+                        giving_col = col
+                        break
+                
+                if not unassigned_df.empty and prob_col and giving_col:
+                    # Convert to numeric
+                    giving_values = pd.to_numeric(unassigned_df[giving_col], errors='coerce').fillna(0)
+                    
+                    # Filter to top quartile by lifetime giving
+                    giving_threshold = giving_values.quantile(0.75)
+                    top_quartile = unassigned_df[giving_values >= giving_threshold].copy()
+                    
+                    if not top_quartile.empty:
+                        # Get last gift date
+                        if 'Last_Gift_Date' in top_quartile.columns:
+                            top_quartile['Last_Gift_Date'] = pd.to_datetime(top_quartile['Last_Gift_Date'], errors='coerce')
+                            today = pd.Timestamp.now()
+                            top_quartile['Days_Since_Last_Gift'] = (today - top_quartile['Last_Gift_Date']).dt.days
+                        else:
+                            # Try alternative columns
+                            days_col = None
+                            for col in ['days_since_last_gift', 'days_since_last', 'Days_Since_Last_Gift']:
+                                if col in top_quartile.columns:
+                                    days_col = col
+                                    break
+                            if days_col:
+                                top_quartile['Days_Since_Last_Gift'] = pd.to_numeric(top_quartile[days_col], errors='coerce')
+                            else:
+                                top_quartile['Days_Since_Last_Gift'] = None
+                        
+                        # Convert probability to numeric
+                        prob_values = pd.to_numeric(top_quartile[prob_col], errors='coerce').fillna(0)
+                        giving_values_top = pd.to_numeric(top_quartile[giving_col], errors='coerce').fillna(0)
+                        
+                        # Filter out invalid data
+                        valid_data = top_quartile[
+                            prob_values.notna() & 
+                            top_quartile['Days_Since_Last_Gift'].notna() &
+                            (top_quartile['Days_Since_Last_Gift'] >= 0)
+                        ].copy()
+                        
+                        if not valid_data.empty:
+                            # Recalculate probability values for valid_data (matching indices)
+                            valid_prob_values = pd.to_numeric(valid_data[prob_col], errors='coerce').fillna(0)
+                            valid_days = valid_data['Days_Since_Last_Gift']
+                            valid_giving = pd.to_numeric(valid_data[giving_col], errors='coerce').fillna(0)
+                            
+                            # Define thresholds
+                            high_prob_threshold = 0.7
+                            recent_threshold = 365  # days (1 year)
+                            moderately_lapsed_max = 1095  # days (3 years)
+                            
+                            # Calculate quadrant metrics
+                            quadrants = {
+                                'hot': {
+                                    'label': '🔥 HOT PROSPECTS',
+                                    'desc': 'High Prob + Recent',
+                                    'mask': (valid_prob_values >= high_prob_threshold) & (valid_days <= recent_threshold),
+                                    'color': '#e74c3c',
+                                    'priority': 1
+                                },
+                                'reeng': {
+                                    'label': '🔄 RE-ENGAGEMENT',
+                                    'desc': 'High Prob + 1-3 Years Lapsed',
+                                    'mask': (valid_prob_values >= high_prob_threshold) & (valid_days > recent_threshold) & (valid_days <= moderately_lapsed_max),
+                                    'color': '#f39c12',
+                                    'priority': 2
+                                },
+                                'monitor': {
+                                    'label': '👀 MONITOR',
+                                    'desc': 'Low Prob + Recent',
+                                    'mask': (valid_prob_values < high_prob_threshold) & (valid_days <= recent_threshold),
+                                    'color': '#3498db',
+                                    'priority': 3
+                                },
+                                'longshot': {
+                                    'label': '🎲 LONG SHOT',
+                                    'desc': 'Low Prob + Lapsed',
+                                    'mask': (valid_prob_values < high_prob_threshold) & (valid_days > recent_threshold),
+                                    'color': '#95a5a6',
+                                    'priority': 4
+                                }
+                            }
+                            
+                            # Calculate stats for each quadrant
+                            for key, quad in quadrants.items():
+                                quad_data = valid_data[quad['mask']]
+                                quad['count'] = len(quad_data)
+                                quad['median_giving'] = valid_giving[quad['mask']].median() if quad['count'] > 0 else 0
+                                quad['total_giving'] = valid_giving[quad['mask']].sum() if quad['count'] > 0 else 0
+                                quad['avg_prob'] = valid_prob_values[quad['mask']].mean() if quad['count'] > 0 else 0
+                                # Calculate median_days from the filtered quad_data to ensure correct alignment (median is more robust to outliers)
+                                quad_days = quad_data['Days_Since_Last_Gift']
+                                quad['median_days'] = quad_days.median() if quad['count'] > 0 and len(quad_days) > 0 else 0
+                                quad['median_months'] = quad['median_days'] / 30.44 if quad['count'] > 0 else 0  # Convert days to months
+                            
+                            # Helper function to convert hex to rgba for gradients
+                            def hex_to_rgba(hex_color, alpha):
+                                """Convert hex color to rgba string"""
+                                hex_color = hex_color.lstrip('#')
+                                r = int(hex_color[0:2], 16)
+                                g = int(hex_color[2:4], 16)
+                                b = int(hex_color[4:6], 16)
+                                return f"rgba({r}, {g}, {b}, {alpha})"
+                            
+                            # Create 2x2 grid using Streamlit columns
+                            row1_col1, row1_col2 = st.columns(2)
+                            row2_col1, row2_col2 = st.columns(2)
+                            
+                            # Helper function to render a quadrant card
+                            def render_quadrant_card(col, quad_key, border_width=2):
+                                quad = quadrants[quad_key]
+                                bg_start = hex_to_rgba(quad['color'], 0.08)
+                                bg_end = hex_to_rgba(quad['color'], 0.15)
+                                
+                                # Format values properly
+                                median_giving_str = f"${quad['median_giving']:,.0f}" if pd.notna(quad['median_giving']) else "$0"
+                                count_str = f"{quad['count']:,}"
+                                
+                                with col:
+                                    # Build card HTML
+                                    card_html = '<div style="background: linear-gradient(135deg, ' + bg_start + ' 0%, ' + bg_end + ' 100%); '
+                                    card_html += f'border: {border_width}px solid {quad["color"]}; border-radius: 10px; padding: 20px; '
+                                    card_html += 'display: flex; flex-direction: column; justify-content: space-between; min-height: 200px; margin-bottom: 15px;">'
+                                    
+                                    # Header section
+                                    card_html += '<div>'
+                                    card_html += f'<div style="font-size: 18px; font-weight: bold; color: {quad["color"]}; margin-bottom: 5px;">{quad["label"]}</div>'
+                                    card_html += f'<div style="font-size: 12px; color: rgba(255,255,255,0.7); margin-bottom: 15px;">{quad["desc"]}</div>'
+                                    card_html += f'<div style="font-size: 32px; font-weight: bold; color: white; margin-bottom: 10px;">{count_str}</div>'
+                                    card_html += '<div style="font-size: 13px; color: rgba(255,255,255,0.8);">prospects</div>'
+                                    card_html += '</div>'
+                                    
+                                    # Metrics section
+                                    card_html += '<div style="border-top: 1px solid rgba(255,255,255,0.2); padding-top: 10px; margin-top: 10px;">'
+                                    card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-bottom: 3px;">Median Lifetime Giving</div>'
+                                    card_html += f'<div style="font-size: 16px; font-weight: bold; color: white;">{median_giving_str}</div>'
+                                    
+                                    # Add quadrant-specific metrics
+                                    if quad_key == 'hot':
+                                        total_giving_value = quad['total_giving']
+                                        # Format as billions if >= 1B, otherwise millions
+                                        if total_giving_value >= 1_000_000_000:
+                                            total_potential = total_giving_value / 1_000_000_000
+                                            card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Total Potential</div>'
+                                            card_html += f'<div style="font-size: 16px; font-weight: bold; color: white;">${total_potential:.3f}B</div>'
+                                        else:
+                                            total_potential = total_giving_value / 1_000_000
+                                            card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Total Potential</div>'
+                                            card_html += f'<div style="font-size: 16px; font-weight: bold; color: white;">${total_potential:.3f}M</div>'
+                                    elif quad_key == 'reeng':
+                                        median_months = quad['median_months'] if pd.notna(quad['median_months']) and quad['median_months'] > 0 else 0
+                                        # Ensure we have valid data
+                                        if quad['count'] > 0 and median_months > 0:
+                                            card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Median Months Since Last Gift</div>'
+                                            card_html += f'<div style="font-size: 16px; font-weight: bold; color: white;">{median_months:.1f} months</div>'
+                                        else:
+                                            card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Median Months Since Last Gift</div>'
+                                            card_html += '<div style="font-size: 16px; font-weight: bold; color: white;">N/A</div>'
+                                    elif quad_key == 'monitor':
+                                        avg_prob_str = f"{quad['avg_prob']:.1%}" if pd.notna(quad['avg_prob']) else "0.0%"
+                                        card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Avg Probability</div>'
+                                        card_html += f'<div style="font-size: 16px; font-weight: bold; color: white;">{avg_prob_str}</div>'
+                                    elif quad_key == 'longshot':
+                                        median_months = quad['median_months'] if pd.notna(quad['median_months']) and quad['median_months'] > 0 else 0
+                                        # Ensure we have valid data
+                                        if quad['count'] > 0 and median_months > 0:
+                                            card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Median Months Since Last Gift</div>'
+                                            card_html += f'<div style="font-size: 16px; font-weight: bold; color: white;">{median_months:.1f} months</div>'
+                                        else:
+                                            card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Median Months Since Last Gift</div>'
+                                            card_html += '<div style="font-size: 16px; font-weight: bold; color: white;">N/A</div>'
+                                    
+                                    # Close metrics section and card
+                                    card_html += '</div></div>'
+                                    
+                                    st.markdown(card_html, unsafe_allow_html=True)
+                            
+                            # Render all four quadrants
+                            render_quadrant_card(row1_col1, 'hot', border_width=3)  # Top Left
+                            render_quadrant_card(row1_col2, 'reeng')  # Top Right
+                            render_quadrant_card(row2_col1, 'monitor')  # Bottom Left
+                            render_quadrant_card(row2_col2, 'longshot')  # Bottom Right
+                            
+                            st.caption(f"💡 **How to read**: Prospects segmented by probability to give again (≥70% = High) and recency (≤365 days = Recent). Focus on **🔥 HOT PROSPECTS** first - they have both high likelihood AND recent engagement. Total top-quartile unassigned: {len(valid_data):,} (lifetime giving ≥${giving_threshold:,.0f}).")
+                        else:
+                            st.info("No valid data available (missing last gift date or probability information).")
+                    else:
+                        st.info(f"No unassigned donors found in top quartile (lifetime giving ≥ ${giving_threshold:,.2f}).")
+                else:
+                    missing_cols = []
+                    if not prob_col:
+                        missing_cols.append("Will_Give_Again_Probability")
+                    if not giving_col:
+                        missing_cols.append("lifetime giving column (total_giving/Lifetime_Giving)")
+                    st.info(f"Required columns not available. Missing: {', '.join(missing_cols)}.")
+            st.markdown('</div>', unsafe_allow_html=True)
+        else:
+            st.info("⚠️ Gift officer assignment data (Primary_Manager column) not available in the dataset.")
 
         # Insights Section
         st.markdown('<div class="info-box">', unsafe_allow_html=True)
@@ -521,7 +943,3 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
             """)
 
         st.markdown('</div>', unsafe_allow_html=True)
-
-    # ============================================================================
-    # OTHER PAGES (PLACEHOLDERS - USE YOUR EXISTING FUNCTIONS)
-    # ============================================================================

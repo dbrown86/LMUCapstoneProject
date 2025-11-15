@@ -73,6 +73,84 @@ def get_css_styles() -> str:
         border-bottom: 2px solid rgba(255,255,255,0.3);
     }
     
+    /* Prevent text wrapping in sidebar radio buttons */
+    [data-testid="stSidebar"] .stRadio label,
+    [data-testid="stSidebar"] .stRadio label span,
+    [data-testid="stSidebar"] [data-baseweb="radio"] label,
+    [data-testid="stSidebar"] [data-baseweb="radio"] label span,
+    [data-testid="stSidebar"] [data-baseweb="radio"] [class*="label"],
+    [data-testid="stSidebar"] [class*="radio"] label {
+        white-space: nowrap !important;
+        overflow: visible !important;
+        text-overflow: clip !important;
+        display: inline-block !important;
+    }
+    [data-testid="stSidebar"] .stRadio,
+    [data-testid="stSidebar"] [data-baseweb="radio"] {
+        white-space: nowrap !important;
+        overflow: visible !important;
+    }
+    /* Ensure radio button items don't wrap */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div,
+    [data-testid="stSidebar"] .stRadio > div {
+        white-space: nowrap !important;
+    }
+    
+    /* Align page titles with radio buttons and remove spacing between items */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div,
+    [data-testid="stSidebar"] .stRadio > div {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+        margin-top: 0 !important;
+        padding-top: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+    }
+    /* Align radio button labels with their indicators */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div > label,
+    [data-testid="stSidebar"] .stRadio > div > label {
+        margin: 0 !important;
+        padding: 0 !important;
+        display: flex !important;
+        align-items: center !important;
+        line-height: 1.4 !important;
+        cursor: pointer !important;
+    }
+    /* Align radio button indicator */
+    [data-testid="stSidebar"] [data-baseweb="radio"] input[type="radio"],
+    [data-testid="stSidebar"] .stRadio input[type="radio"],
+    [data-testid="stSidebar"] [data-baseweb="radio"] [role="radio"] {
+        margin: 0 !important;
+        margin-right: 6px !important;
+        vertical-align: middle !important;
+        align-self: center !important;
+        flex-shrink: 0 !important;
+    }
+    /* Align text content next to radio button */
+    [data-testid="stSidebar"] [data-baseweb="radio"] label > span,
+    [data-testid="stSidebar"] .stRadio label > span,
+    [data-testid="stSidebar"] [data-baseweb="radio"] label > *:not(input),
+    [data-testid="stSidebar"] .stRadio label > *:not(input) {
+        vertical-align: middle !important;
+        align-self: center !important;
+        line-height: 1.4 !important;
+    }
+    /* Remove spacing between radio button rows */
+    [data-testid="stSidebar"] [data-baseweb="radio"] > div:not(:last-child),
+    [data-testid="stSidebar"] .stRadio > div:not(:last-child) {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    /* Target all radio button containers in sidebar */
+    [data-testid="stSidebar"] [data-baseweb="radio"] {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    [data-testid="stSidebar"] .stRadio {
+        margin-bottom: 0 !important;
+        padding-bottom: 0 !important;
+    }
+    
     .stButton > button {
         background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
         color: white;
@@ -128,24 +206,146 @@ def get_css_styles() -> str:
 <script>
 (function() {
     function hideDeprecationWarnings() {
-        document.querySelectorAll('[data-testid="stWarning"], [data-testid="stAlert"], .stAlert, .element-container').forEach(function(el) {
-            const text = (el.textContent || el.innerText || '').toLowerCase();
-            if (text.includes('deprecated') || text.includes('keyword arguments') || text.includes('use config instead')) {
-                el.style.display = 'none';
-                el.style.visibility = 'hidden';
-                el.style.height = '0';
-                el.style.margin = '0';
-                el.style.padding = '0';
+        // More comprehensive selector to catch all warning elements
+        const selectors = [
+            '[data-testid="stWarning"]',
+            '[data-testid="stAlert"]',
+            '.stAlert',
+            '.element-container',
+            '[class*="alert"]',
+            '[class*="warning"]',
+            '[role="alert"]',
+            'div[class*="stMarkdownContainer"]',
+            'div[class*="stException"]',
+            '[class*="stException"]',
+            'div[class*="alert-warning"]',
+            '[class*="alert-warning"]'
+        ];
+        
+        // Keywords to match in warning text
+        const warningKeywords = [
+            'deprecated',
+            'keyword arguments',
+            'use config instead',
+            'will be removed in a future release',
+            'plotly',
+            'streamlit'
+        ];
+        
+        selectors.forEach(function(selector) {
+            try {
+                document.querySelectorAll(selector).forEach(function(el) {
+                    const text = (el.textContent || el.innerText || '').toLowerCase();
+                    const shouldHide = warningKeywords.some(function(keyword) {
+                        return text.includes(keyword);
+                    });
+                    
+                    if (shouldHide) {
+                        // Aggressively hide the element
+                        el.style.display = 'none';
+                        el.style.visibility = 'hidden';
+                        el.style.height = '0';
+                        el.style.margin = '0';
+                        el.style.padding = '0';
+                        el.style.overflow = 'hidden';
+                        el.style.opacity = '0';
+                        el.style.position = 'absolute';
+                        el.setAttribute('data-hidden', 'true');
+                        
+                        // Also try to remove from DOM or hide parent
+                        try {
+                            if (el.parentNode && el.parentNode.style) {
+                                const parentText = (el.parentNode.textContent || el.parentNode.innerText || '').toLowerCase();
+                                if (warningKeywords.some(function(kw) { return parentText.includes(kw); })) {
+                                    el.parentNode.style.display = 'none';
+                                    el.parentNode.style.visibility = 'hidden';
+                                }
+                            }
+                        } catch(e) {
+                            // Ignore errors when manipulating parent
+                        }
+                    }
+                });
+            } catch(e) {
+                // Silently ignore selector errors
             }
         });
     }
+    
+    // Run immediately
+    hideDeprecationWarnings();
+    
+    // Run on DOM ready
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', hideDeprecationWarnings);
     } else {
         hideDeprecationWarnings();
     }
-    const observer = new MutationObserver(hideDeprecationWarnings);
-    observer.observe(document.body, { childList: true, subtree: true });
+    
+    // Observe for new elements with more aggressive settings
+    const observer = new MutationObserver(function(mutations) {
+        hideDeprecationWarnings();
+    });
+    
+    if (document.body) {
+        observer.observe(document.body, { 
+            childList: true, 
+            subtree: true,
+            attributes: true,
+            attributeFilter: ['class', 'data-testid', 'data-hidden']
+        });
+    }
+    
+    // Also observe the main container
+    const mainObserver = new MutationObserver(function(mutations) {
+        hideDeprecationWarnings();
+    });
+    
+    setTimeout(function() {
+        const mainContainer = document.querySelector('[data-testid="stAppViewContainer"]') || 
+                             document.querySelector('main') || 
+                             document.body;
+        if (mainContainer) {
+            mainObserver.observe(mainContainer, {
+                childList: true,
+                subtree: true,
+                attributes: true
+            });
+        }
+    }, 100);
+    
+    // Run periodically to catch any missed warnings
+    setInterval(hideDeprecationWarnings, 500);
+    
+    // Also intercept console warnings if possible
+    if (window.console && console.warn) {
+        const originalWarn = console.warn;
+        console.warn = function(...args) {
+            const message = args.join(' ').toLowerCase();
+            if (message.includes('deprecated') || 
+                message.includes('keyword arguments') || 
+                message.includes('use config instead') ||
+                message.includes('plotly') && message.includes('config')) {
+                // Suppress this warning
+                return;
+            }
+            originalWarn.apply(console, args);
+        };
+    }
+    
+    // Intercept console.error for deprecation messages
+    if (window.console && console.error) {
+        const originalError = console.error;
+        console.error = function(...args) {
+            const message = args.join(' ').toLowerCase();
+            if (message.includes('deprecated') && 
+                (message.includes('keyword arguments') || message.includes('config'))) {
+                // Suppress this error
+                return;
+            }
+            originalError.apply(console, args);
+        };
+    }
 })();
 </script>
 """
