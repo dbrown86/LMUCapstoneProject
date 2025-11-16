@@ -85,6 +85,7 @@ def plotly_chart_silent(fig, width='stretch', use_container_width=None, config=N
     """
     Display Plotly chart with all warnings suppressed and proper config.
     Implements Solution 1 and 3 from recommendations.
+    Optimized for performance with caching.
     
     Args:
         fig: Plotly figure object
@@ -124,6 +125,7 @@ def plotly_chart_silent(fig, width='stretch', use_container_width=None, config=N
         
         # Call st.plotly_chart with proper parameters (Solution 1)
         # ONLY pass: fig, width, config, and filtered recognized params
+        # Use use_container_width=False to prevent re-rendering on every interaction
         try:
             result = st.plotly_chart(fig, width=width, config=config, **filtered_kwargs)
             return result

@@ -37,7 +37,10 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
     st.markdown('<p class="page-title">⚡ Take Action</p>', unsafe_allow_html=True)
     st.markdown('<p class="page-subtitle">Prioritized outreach recommendations and next steps</p>', unsafe_allow_html=True)
     
-    if 'predicted_prob' not in df.columns:
+    # CRITICAL: Use 2025 prediction column - prioritize Will_Give_Again_Probability
+    prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
+    
+    if prob_col not in df.columns:
         st.error("Prediction data not available. Please ensure the model has been trained.")
         return
     
@@ -45,8 +48,8 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
     threshold = saved_meta.get('optimal_threshold', prob_threshold)
     
     # Categorize opportunities
-    high_prob = df[df['predicted_prob'] >= 0.7].copy()
-    medium_prob = df[(df['predicted_prob'] >= 0.4) & (df['predicted_prob'] < 0.7)].copy()
+    high_prob = df[df[prob_col] >= 0.7].copy()
+    medium_prob = df[(df[prob_col] >= 0.4) & (df[prob_col] < 0.7)].copy()
     
     # Helper to ensure unique column names (avoid Arrow duplicate-name crash)
     def _ensure_unique_columns(df_in: pd.DataFrame) -> pd.DataFrame:
@@ -65,24 +68,24 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
 
     # Quick Wins: High probability recent donors
     if 'segment' in df.columns:
-        quick_wins = high_prob[high_prob['segment'] == 'Recent (0-6mo)'].nlargest(50, 'predicted_prob') if len(high_prob) > 0 else pd.DataFrame()
-        cultivation = medium_prob.nlargest(100, 'predicted_prob') if len(medium_prob) > 0 else pd.DataFrame()
+        quick_wins = high_prob[high_prob['segment'] == 'Recent (0-6mo)'].nlargest(50, prob_col) if len(high_prob) > 0 else pd.DataFrame()
+        cultivation = medium_prob.nlargest(100, prob_col) if len(medium_prob) > 0 else pd.DataFrame()
         
         # Re-engagement: Lapsed but high predicted probability
         re_engagement = df[
-            (df['predicted_prob'] >= 0.6) & 
+            (df[prob_col] >= 0.6) & 
             (df['segment'].isin(['Lapsed (1-2yr)', 'Very Lapsed (2yr+)']))
-        ].nlargest(50, 'predicted_prob') if 'segment' in df.columns else pd.DataFrame()
+        ].nlargest(50, prob_col) if 'segment' in df.columns else pd.DataFrame()
         
         # Display Quick Wins
         st.markdown("### 🎯 Quick Wins - High Probability Recent Donors")
         st.info("**Priority:** Contact immediately. These donors have high likelihood (>70%) and gave recently (0-6 months).")
         
         if len(quick_wins) > 0:
-            base_cols_qw = [c for c in ['donor_id', 'predicted_prob', 'avg_gift', 'total_giving', 'segment'] if c in quick_wins.columns]
+            base_cols_qw = [c for c in ['donor_id', prob_col, 'avg_gift', 'total_giving', 'segment'] if c in quick_wins.columns]
             quick_wins_display = quick_wins[base_cols_qw].copy()
             quick_wins_display = quick_wins_display.rename(columns={
-                'predicted_prob': 'Probability',
+                prob_col: 'Probability',
                 'avg_gift': 'Avg Gift',
                 'total_giving': 'Lifetime Value'
             })
@@ -92,7 +95,7 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
             quick_wins_display = _ensure_unique_columns(quick_wins_display)
             st.dataframe(quick_wins_display.head(20), width='stretch', hide_index=True)
             
-            csv_quick = quick_wins[['donor_id', 'predicted_prob', 'avg_gift']].to_csv(index=False)
+            csv_quick = quick_wins[['donor_id', prob_col, 'avg_gift']].to_csv(index=False)
             st.download_button(
                 "📥 Download Quick Wins List (50 donors)",
                 csv_quick,
@@ -109,10 +112,10 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
         st.info("**Priority:** Build relationships. These donors have moderate likelihood (40-70%) but high lifetime value.")
         
         if len(cultivation) > 0:
-            base_cols_cult = [c for c in ['donor_id', 'predicted_prob', 'avg_gift', 'total_giving', 'segment'] if c in cultivation.columns]
+            base_cols_cult = [c for c in ['donor_id', prob_col, 'avg_gift', 'total_giving', 'segment'] if c in cultivation.columns]
             cultivation_display = cultivation[base_cols_cult].copy()
             cultivation_display = cultivation_display.rename(columns={
-                'predicted_prob': 'Probability',
+                prob_col: 'Probability',
                 'avg_gift': 'Avg Gift',
                 'total_giving': 'Lifetime Value'
             })
@@ -122,7 +125,7 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
             cultivation_display = _ensure_unique_columns(cultivation_display)
             st.dataframe(cultivation_display.head(20), width='stretch', hide_index=True)
             
-            csv_cult = cultivation[['donor_id', 'predicted_prob', 'avg_gift']].to_csv(index=False)
+            csv_cult = cultivation[['donor_id', prob_col, 'avg_gift']].to_csv(index=False)
             st.download_button(
                 "📥 Download Cultivation List (100 donors)",
                 csv_cult,
@@ -137,10 +140,10 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
         st.info("**Priority:** Reconnect strategically. These donors haven't given recently but show strong likelihood (>60%).")
         
         if len(re_engagement) > 0:
-            base_cols_re = [c for c in ['donor_id', 'predicted_prob', 'avg_gift', 'total_giving', 'segment'] if c in re_engagement.columns]
+            base_cols_re = [c for c in ['donor_id', prob_col, 'avg_gift', 'total_giving', 'segment'] if c in re_engagement.columns]
             reeng_display = re_engagement[base_cols_re].copy()
             reeng_display = reeng_display.rename(columns={
-                'predicted_prob': 'Probability',
+                prob_col: 'Probability',
                 'avg_gift': 'Avg Gift',
                 'total_giving': 'Lifetime Value'
             })
@@ -150,7 +153,7 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
             reeng_display = _ensure_unique_columns(reeng_display)
             st.dataframe(reeng_display.head(20), width='stretch', hide_index=True)
             
-            csv_reeng = re_engagement[['donor_id', 'predicted_prob', 'avg_gift']].to_csv(index=False)
+            csv_reeng = re_engagement[['donor_id', prob_col, 'avg_gift']].to_csv(index=False)
             st.download_button(
                 "📥 Download Re-engagement List (50 donors)",
                 csv_reeng,
@@ -164,8 +167,8 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
     
     with col1:
         # Compute expected response rate display safely
-        if len(quick_wins) > 0 and 'predicted_prob' in quick_wins.columns:
-            _qw_mean = pd.to_numeric(quick_wins['predicted_prob'], errors='coerce').mean()
+        if len(quick_wins) > 0 and prob_col in quick_wins.columns:
+            _qw_mean = pd.to_numeric(quick_wins[prob_col], errors='coerce').mean()
             expected_rate_display = f"{_qw_mean:.1%}" if pd.notna(_qw_mean) else "High"
         else:
             expected_rate_display = "High"

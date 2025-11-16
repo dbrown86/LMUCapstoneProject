@@ -97,9 +97,11 @@ PROBABILITY_COLUMN_VARIANTS = [
 ]
 
 OUTCOME_COLUMN_VARIANTS = [
+    'Gave_Again_In_2025',
     'Gave_Again_In_2024',
     'actual_gave',
     'gave_again',
+    'gave_again_in_2025',
     'gave_again_in_2024'
 ]
 

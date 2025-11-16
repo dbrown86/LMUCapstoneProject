@@ -63,20 +63,20 @@ def render(df: pd.DataFrame, prob_threshold: float):
     saved_meta = try_load_saved_metrics() or {}
     threshold = saved_meta.get('optimal_threshold', prob_threshold)
 
-    # CRITICAL: Use Will_Give_Again_Probability directly if available (from generate_will_give_again_predictions.py)
-    # Fall back to predicted_prob if Will_Give_Again_Probability doesn't exist
+    # CRITICAL: Use 2025 columns - prioritize Will_Give_Again_Probability and Gave_Again_In_2025
     prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
+    outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else 'actual_gave')
 
     # Calculate actual dollars at stake
-    if prob_col in df.columns and 'actual_gave' in df.columns and 'total_giving' in df.columns and 'avg_gift' in df.columns:
+    if prob_col in df.columns and outcome_col in df.columns and 'total_giving' in df.columns and 'avg_gift' in df.columns:
             # High probability prospects
             high_prob_donors = df[df[prob_col] >= threshold].copy()
             high_prob_count = len(high_prob_donors)
 
-            # Calculate expected conversions
-            if 'actual_gave' in df.columns:
-                # Baseline conversion (actual rate)
-                baseline_rate = df['actual_gave'].mean() if 'actual_gave' in df.columns else 0.17
+            # Calculate expected conversions (using 2025 outcomes)
+            if outcome_col in df.columns:
+                # Baseline conversion (actual rate from 2025 outcomes)
+                baseline_rate = df[outcome_col].mean() if outcome_col in df.columns else 0.17
                 # Handle NaN or None
                 if pd.isna(baseline_rate) or baseline_rate is None:
                     baseline_rate = 0.17
@@ -88,8 +88,8 @@ def render(df: pd.DataFrame, prob_threshold: float):
                     st.warning(f"⚠️ Baseline conversion rate is >100% ({baseline_rate:.2%}). Using default 17%.")
                     baseline_rate = 0.17
 
-                # Fusion model conversion (for high probability group) - use actual data
-                high_prob_rate = high_prob_donors['actual_gave'].mean() if len(high_prob_donors) > 0 and 'actual_gave' in high_prob_donors.columns else None
+                # Fusion model conversion (for high probability group) - use actual 2025 data
+                high_prob_rate = high_prob_donors[outcome_col].mean() if len(high_prob_donors) > 0 and outcome_col in high_prob_donors.columns else None
                 if high_prob_rate is None:
                     st.warning("⚠️ Actual conversion rate for high-probability donors not available. Using baseline rate estimate.")
                     high_prob_rate = baseline_rate
@@ -136,8 +136,8 @@ def render(df: pd.DataFrame, prob_threshold: float):
 
                 # Fusion scenario (using top predictions) - use actual response rate from top predicted donors
                 fusion_contacts = num_to_contact
-                if len(top_donors) > 0 and 'actual_gave' in top_donors.columns:
-                    fusion_response_rate = top_donors['actual_gave'].mean()
+                if len(top_donors) > 0 and outcome_col in top_donors.columns:
+                    fusion_response_rate = top_donors[outcome_col].mean()
                     # Handle NaN or None
                     if pd.isna(fusion_response_rate) or fusion_response_rate is None:
                         fusion_response_rate = baseline_rate
@@ -172,8 +172,8 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         missing_cols = []
                         if prob_col not in df.columns:
                             missing_cols.append(prob_col)
-                        if 'actual_gave' not in df.columns:
-                            missing_cols.append('actual_gave')
+                        if outcome_col not in df.columns:
+                            missing_cols.append(outcome_col)
                         if 'avg_gift' not in df.columns and _last_gift_col_used is None:
                             missing_cols.append('avg_gift or Last_Gift')
 
@@ -226,222 +226,6 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">vs Baseline</div>
                     </div>
                     """, unsafe_allow_html=True)
-
-                st.markdown("<br>", unsafe_allow_html=True)
-
-                # Verification Section
-                with st.expander("✅ Verification & Calculation Details", expanded=False):
-                    st.markdown("### 🔍 How to Verify These Calculations")
-                    st.markdown("""
-                    Use this section to manually verify the hero metrics and before/after chart values.
-                    All calculations use the following formulas:
-                    """)
-
-                    verification_data = {
-                        'Input/Calculation': [
-                            '**INPUTS**',
-                            'Total donors in dataset',
-                            'Contact percentage (slider)',
-                            'Number of donors to contact',
-                            'Cost per contact ($)',
-                            'Average gift amount ($)',
-                            'Baseline conversion rate',
-                            'Fusion response rate (top predicted donors)',
-                            '',
-                            '**BASELINE CALCULATIONS**',
-                            'Baseline contacts',
-                            'Baseline responses',
-                            'Baseline revenue',
-                            'Baseline cost',
-                            'Baseline ROI',
-                            '',
-                            '**FUSION CALCULATIONS**',
-                            'Fusion contacts',
-                            'Fusion responses',
-                            'Fusion revenue',
-                            'Fusion cost',
-                            'Fusion ROI',
-                            '',
-                            '**HERO METRICS**',
-                            'Revenue (Baseline)',
-                            'Revenue (Fusion)',
-                            'Revenue Gain',
-                            'ROI Improvement',
-                        ],
-                        'Value': [
-                            '',
-                            f"{len(df):,}",
-                            f"{contact_percentage}%",
-                            f"{num_to_contact:,}",
-                            f"${cost_per_contact:.2f}",
-                            f"${avg_gift_amount:,.2f}",
-                            f"{baseline_rate:.4%}",
-                            f"{fusion_response_rate:.4%}",
-                            '',
-                            '',
-                            f"{baseline_contacts:,}",
-                            f"{baseline_responses:,}",
-                            f"${baseline_revenue:,.2f}",
-                            f"${baseline_cost:,.2f}",
-                            f"{baseline_roi:.2f}%",
-                            '',
-                            '',
-                            f"{fusion_contacts:,}",
-                            f"{fusion_responses:,}",
-                            f"${fusion_revenue:,.2f}",
-                            f"${fusion_cost:,.2f}",
-                            f"{fusion_roi:.2f}%",
-                            '',
-                            '',
-                            f"${baseline_revenue:,.0f}",
-                            f"${fusion_revenue:,.0f}",
-                            f"${revenue_gain:,.0f}",
-                            f"+{roi_improvement:.0f}%",
-                        ],
-                        'Formula': [
-                            '',
-                            'Count of rows in dataframe',
-                            'User-selected slider value',
-                            'len(df) × contact_percentage / 100',
-                            'User-selected sidebar input',
-                            'Median of Last_Gift column (or avg_gift fallback)',
-                            'Mean of actual_gave column (all donors)',
-                            'Mean of actual_gave for top predicted donors',
-                            '',
-                            '',
-                            'num_to_contact',
-                            'int(baseline_contacts × baseline_rate)',
-                            'baseline_responses × avg_gift_amount',
-                            'baseline_contacts × cost_per_contact',
-                            '((baseline_revenue - baseline_cost) / baseline_cost) × 100',
-                            '',
-                            '',
-                            'num_to_contact',
-                            'int(fusion_contacts × fusion_response_rate)',
-                            'fusion_responses × avg_gift_amount',
-                            'fusion_contacts × cost_per_contact',
-                            '((fusion_revenue - fusion_cost) / fusion_cost) × 100',
-                            '',
-                            '',
-                            'baseline_revenue (rounded)',
-                            'fusion_revenue (rounded)',
-                            'fusion_revenue - baseline_revenue',
-                            'fusion_roi - baseline_roi',
-                        ]
-                    }
-
-                    verification_df = pd.DataFrame(verification_data)
-                    st.dataframe(verification_df, width='stretch', hide_index=True)
-
-                    st.markdown("---")
-                    st.markdown("### 📝 Manual Verification Steps")
-
-                    col1, col2 = st.columns(2)
-
-                    with col1:
-                        st.markdown("""
-                        **1. Verify Baseline Revenue:**
-                        - Baseline contacts: {:,}
-                        - Baseline rate: {:.2%}
-                        - Baseline responses: {:,} × {:.2%} = {:,}
-                        - Revenue: {:,} × ${:.2f} = **${:,.2f}**
-                        """.format(
-                            baseline_contacts,
-                            baseline_rate,
-                            baseline_contacts,
-                            baseline_rate,
-                            baseline_responses,
-                            baseline_responses,
-                            avg_gift_amount,
-                            baseline_revenue
-                        ))
-
-                        st.markdown("""
-                        **2. Verify Fusion Revenue:**
-                        - Fusion contacts: {:,}
-                        - Fusion rate: {:.2%}
-                        - Fusion responses: {:,} × {:.2%} = {:,}
-                        - Revenue: {:,} × ${:.2f} = **${:,.2f}**
-                        """.format(
-                            fusion_contacts,
-                            fusion_response_rate,
-                            fusion_contacts,
-                            fusion_response_rate,
-                            fusion_responses,
-                            fusion_responses,
-                            avg_gift_amount,
-                            fusion_revenue
-                        ))
-
-                    with col2:
-                        st.markdown("""
-                        **3. Verify Revenue Gain:**
-                        - Fusion revenue: ${:,.2f}
-                        - Baseline revenue: ${:,.2f}
-                        - Gain: ${:,.2f} - ${:,.2f} = **${:,.2f}**
-                        """.format(
-                            fusion_revenue,
-                            baseline_revenue,
-                            fusion_revenue,
-                            baseline_revenue,
-                            revenue_gain
-                        ))
-
-                        st.markdown("""
-                        **4. Verify ROI Improvement:**
-                        - Fusion ROI: {:.2f}%
-                        - Baseline ROI: {:.2f}%
-                        - Improvement: {:.2f}% - {:.2f}% = **{:.2f}%**
-                        """.format(
-                            fusion_roi,
-                            baseline_roi,
-                            fusion_roi,
-                            baseline_roi,
-                            roi_improvement
-                        ))
-
-                    st.markdown("---")
-                    st.markdown("### 📊 Data Source Verification")
-
-                    data_source_info = {
-                        'Data Source': [
-                            'Probability Column',
-                            'Outcome Column',
-                            'Gift Amount Column',
-                            'Top Donors Selection',
-                        ],
-                        'Value': [
-                            prob_col,
-                            'actual_gave',
-                            _last_gift_col_used if _last_gift_col_used else ('avg_gift (fallback)' if 'avg_gift' in df.columns else 'N/A'),
-                            f'Top {num_to_contact:,} by {prob_col}',
-                        ],
-                        'Sample Values': [
-                            f"Range: {df[prob_col].min():.3f} - {df[prob_col].max():.3f}",
-                            f"Mean: {df['actual_gave'].mean():.4f}, Sum: {df['actual_gave'].sum():,}",
-                            f"Median: ${pd.to_numeric(df[_last_gift_col_used if _last_gift_col_used else ('avg_gift' if 'avg_gift' in df.columns else None)], errors='coerce').median():,.2f}" if (_last_gift_col_used or 'avg_gift' in df.columns) else "N/A",
-                            f"Min prob in top: {top_donors[prob_col].min():.3f}, Max: {top_donors[prob_col].max():.3f}",
-                        ]
-                    }
-
-                    source_df = pd.DataFrame(data_source_info)
-                    st.dataframe(source_df, width='stretch', hide_index=True)
-
-                    # Export button for verification data
-                    if st.button("📥 Download Verification Data (CSV)"):
-                        export_data = {
-                            'metric': verification_data['Input/Calculation'],
-                            'value': verification_data['Value'],
-                            'formula': verification_data['Formula']
-                        }
-                        export_df = pd.DataFrame(export_data)
-                        csv = export_df.to_csv(index=False)
-                        st.download_button(
-                            label="Download CSV",
-                            data=csv,
-                            file_name=f"business_impact_verification_{pd.Timestamp.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv"
-                        )
 
                 # Before/After Comparison
                 st.markdown("### 📊 Before & After: Targeted Outreach Impact")
@@ -679,7 +463,7 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         categories_data.append({
                             'Category': '🎯 Quick Wins',
                             'Count': len(quick_wins_df),
-                            'Avg Probability': quick_wins_df[prob_col].mean(),
+                            'Median Probability to Give Again': pd.to_numeric(quick_wins_df[prob_col], errors='coerce').median(),
                             'Avg Gift': qw_avg_gift,
                             'Estimated Revenue': qw_revenue,
                             'Priority': 1,
@@ -694,7 +478,7 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         categories_data.append({
                             'Category': '🌱 Cultivation Targets',
                             'Count': len(cultivation_df),
-                            'Avg Probability': cultivation_df[prob_col].mean(),
+                            'Median Probability to Give Again': pd.to_numeric(cultivation_df[prob_col], errors='coerce').median(),
                             'Avg Gift': cult_avg_gift,
                             'Estimated Revenue': cult_revenue,
                             'Priority': 2,
@@ -709,7 +493,7 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         categories_data.append({
                             'Category': '🔄 Re-engagement',
                             'Count': len(reeng_df),
-                            'Avg Probability': reeng_df[prob_col].mean(),
+                            'Median Probability to Give Again': pd.to_numeric(reeng_df[prob_col], errors='coerce').median(),
                             'Avg Gift': reeng_avg_gift,
                             'Estimated Revenue': reeng_revenue,
                             'Priority': 3,
@@ -719,32 +503,17 @@ def render(df: pd.DataFrame, prob_threshold: float):
                     if categories_data:
                         categories_df = pd.DataFrame(categories_data)
                         categories_df = categories_df.sort_values('Priority')
-
-                        # Display formatted
-                        display_df = categories_df[['Category', 'Count', 'Avg Probability', 'Avg Gift', 'Estimated Revenue', 'Description']].copy()
-                        display_df = display_df.rename(columns={'Avg Gift': 'Median Last Gift'})
-                        display_df['Avg Probability'] = display_df['Avg Probability'].apply(lambda x: f"{x:.1%}")
+        
+                        # Display formatted table only (chart removed per request)
+                        display_df = categories_df[['Category', 'Count', 'Median Probability to Give Again', 'Avg Gift', 'Estimated Revenue', 'Description']].copy()
+                        display_df = display_df.rename(columns={
+                            'Avg Gift': 'Median Last Gift',
+                            'Median Probability to Give Again': 'Median Probability to Give Again'
+                        })
+                        display_df['Median Probability to Give Again'] = display_df['Median Probability to Give Again'].apply(lambda x: f"{x:.1%}")
                         display_df['Median Last Gift'] = display_df['Median Last Gift'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
                         display_df['Estimated Revenue'] = display_df['Estimated Revenue'].apply(lambda x: f"${x:,.0f}" if pd.notna(x) and x > 0 else "N/A")
-
+        
                         st.dataframe(display_df, width='stretch', hide_index=True)
-
-                        # Visual comparison
-                        fig_cat = go.Figure()
-                        max_revenue = categories_df['Estimated Revenue'].max()
-                        fig_cat.add_trace(go.Bar(
-                            x=categories_df['Category'],
-                            y=categories_df['Estimated Revenue'],
-                            marker_color=['#4caf50', '#2196f3', '#ff9800'][:len(categories_df)],
-                            text=categories_df['Estimated Revenue'].apply(lambda x: f"${x:,.0f}"),
-                            textposition='outside'
-                        ))
-                        fig_cat.update_layout(
-                            title='Revenue Potential by Category',
-                            yaxis_title='Estimated Revenue ($)',
-                            yaxis=dict(range=[0, max_revenue * 1.2]),  # Add 20% padding above max value for labels
-                            height=400
-                        )
-                        plotly_chart_silent(fig_cat, config={'displayModeBar': True, 'displaylogo': False})
     else:
         st.info("Business impact calculations require prediction and financial data.")

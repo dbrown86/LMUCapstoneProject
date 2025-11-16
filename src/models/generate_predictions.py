@@ -30,17 +30,32 @@ import warnings
 warnings.filterwarnings('ignore')
 
 # Import everything from training script
-from simplified_single_target_training import (
-    SingleTargetInfluentialModel,
-    OptimizedSingleTargetDataset,
-    create_temporal_features,
-    create_text_features,
-    create_influence_features,
-    create_strategic_features,
-    create_capacity_features,
-    create_recency_engagement_features,
-    create_rfm_features
-)
+# Note: train_will_give_again.py contains all the necessary classes and functions
+try:
+    from train_will_give_again import (
+        SingleTargetInfluentialModel,
+        OptimizedSingleTargetDataset,
+        create_temporal_features,
+        create_text_features,
+        create_influence_features,
+        create_strategic_features,
+        create_capacity_features,
+        create_recency_engagement_features,
+        create_rfm_features
+    )
+except ImportError:
+    # Fallback to old import name
+    from simplified_single_target_training import (
+        SingleTargetInfluentialModel,
+        OptimizedSingleTargetDataset,
+        create_temporal_features,
+        create_text_features,
+        create_influence_features,
+        create_strategic_features,
+        create_capacity_features,
+        create_recency_engagement_features,
+        create_rfm_features
+    )
 
 # Progress bars
 try:
@@ -237,7 +252,19 @@ else:
 print("\n🎯 Selecting features...")
 from sklearn.feature_selection import mutual_info_classif
 
-# Load feature importance from training if available, otherwise recompute
+# Load the actual 60 features used during training (CRITICAL for model loading)
+selected_features_file_paths = [
+    'results/selected_features_60.csv',
+    '../results/selected_features_60.csv',
+    '../../results/selected_features_60.csv'
+]
+selected_features_file = None
+for path in selected_features_file_paths:
+    if os.path.exists(path):
+        selected_features_file = path
+        break
+
+# Fallback to feature importance file if selected features file doesn't exist
 importance_file_paths = [
     'results/feature_importance_influential_donor.csv',
     '../results/feature_importance_influential_donor.csv',
@@ -249,17 +276,66 @@ for path in importance_file_paths:
         importance_file = path
         break
 
-if importance_file:
-    print("   🗄️  Loading feature importance from training...")
+if selected_features_file:
+    print("   🗄️  Loading selected 60 features from training (exact match)...")
+    selected_features_df = pd.read_csv(selected_features_file)
+    selected_features = selected_features_df['feature'].tolist()  # Exact 60 features in training order
+    print(f"   ✅ Loaded {len(selected_features)} features from training")
+elif importance_file:
+    print("   🗄️  Loading feature importance from training (fallback)...")
     importance_df = pd.read_csv(importance_file)
-    selected_features = importance_df.head(60)['feature'].tolist()  # Top 60 features
-    # Filter to features that exist
-    selected_features = [f for f in selected_features if f in combined_features_df.columns]
-    print(f"   ✅ Selected {len(selected_features)} features from training")
+    # Get all features from importance file, pad to 60 if needed
+    available_importance_features = importance_df['feature'].tolist()
+    if len(available_importance_features) < 60:
+        print(f"   ⚠️  Warning: Importance file only has {len(available_importance_features)} features, need 60")
+        # Use what we have and pad with available features from combined_features_df
+        selected_features = available_importance_features
+        # Add additional features from combined_features_df to reach 60
+        remaining_needed = 60 - len(selected_features)
+        additional_features = [f for f in combined_features_df.columns if f not in selected_features][:remaining_needed]
+        selected_features.extend(additional_features)
+        print(f"   ⚠️  Padded to {len(selected_features)} features using available data features")
+    else:
+        selected_features = available_importance_features[:60]  # Top 60 features
     
-    if len(selected_features) < 60:
-        print(f"   ⚠️  Warning: Only {len(selected_features)}/{60} features found in data")
-        print(f"   🔧 Missing features may affect model performance")
+    # CRITICAL: Model expects exactly 60 features in this exact order
+    # Add missing features as zero-filled columns to match training
+    missing_features = [f for f in selected_features if f not in combined_features_df.columns]
+    if missing_features:
+        print(f"   ⚠️  {len(missing_features)} features missing from data, adding as zero-filled columns:")
+        for feat in missing_features:
+            print(f"      - {feat}")
+            # Add as zero-filled column with same index as combined_features_df
+            combined_features_df[feat] = 0.0
+        print(f"   ✅ Added {len(missing_features)} missing features")
+    
+    # Now verify we have all 60 features (they should all exist now)
+    available_features = [f for f in selected_features if f in combined_features_df.columns]
+    print(f"   🔍 Debug: Checking features...")
+    print(f"      Expected: 60 features")
+    print(f"      Found in dataframe: {len(available_features)} features")
+    print(f"      Combined features df shape: {combined_features_df.shape}")
+    print(f"      Combined features df columns: {len(combined_features_df.columns)}")
+    
+    if len(available_features) != 60:
+        print(f"   ❌ ERROR: Expected 60 features, got {len(available_features)}")
+        missing = set(selected_features) - set(available_features)
+        if missing:
+            print(f"   Missing features: {missing}")
+        else:
+            print(f"   All features found but count is wrong - checking for duplicates...")
+            # Check for duplicates in selected_features
+            from collections import Counter
+            counts = Counter(selected_features)
+            duplicates = [feat for feat, count in counts.items() if count > 1]
+            if duplicates:
+                print(f"   Found duplicate features in importance file: {duplicates}")
+        print(f"   This will cause model loading to fail!")
+        # Use what we have but warn
+        selected_features = available_features
+    else:
+        print(f"   ✅ All 60 features available (in correct order from training)")
+        # Keep selected_features as-is (already in correct order)
 else:
     # CRITICAL DATA LEAKAGE PREVENTION: Cannot recompute feature importance
     # Feature importance MUST come from training to prevent using future outcomes
@@ -485,11 +561,32 @@ if donors_df['Will_Give_Again_Probability'].isna().sum() > 0:
     print(f"   🔧 Filling missing predictions with mean...")
     donors_df['Will_Give_Again_Probability'] = donors_df['Will_Give_Again_Probability'].fillna(all_probs.mean())
 
-# Ensure Gave_Again_In_2024 is included (for dashboard metrics)
+# Ensure Gave_Again_In_2025 is included (for dashboard metrics) - PRIMARY TARGET
 # ALWAYS recreate to ensure it's correct (don't rely on existing column)
-print(f"   📊 Creating 'Gave_Again_In_2024' from giving history...")
+print(f"   📊 Creating 'Gave_Again_In_2025' from giving history...")
 try:
-    giving_2024 = giving_df[giving_df['Gift_Date'] >= '2024-01-01'].copy()
+    giving_2025 = giving_df[giving_df['Gift_Date'] >= '2025-01-01'].copy()
+    if 'Donor_ID' in giving_2025.columns:
+        donors_2025 = giving_2025['Donor_ID'].unique()
+    elif 'ID' in giving_2025.columns:
+        donors_2025 = giving_2025['ID'].unique()
+    else:
+        raise ValueError("Could not find Donor_ID or ID column in giving history")
+    
+    donors_df['Gave_Again_In_2025'] = donors_df['ID'].isin(donors_2025).astype(int)
+    pos_count = donors_df['Gave_Again_In_2025'].sum()
+    pos_rate = donors_df['Gave_Again_In_2025'].mean()
+    print(f"   ✅ 'Gave_Again_In_2025' column created ({pos_count:,} donors gave again, {pos_rate:.1%})")
+except Exception as e:
+    print(f"   ❌ ERROR creating 'Gave_Again_In_2025': {e}")
+    print(f"   ⚠️  Dashboard metrics will be unavailable without this column!")
+    # Create empty column as fallback
+    donors_df['Gave_Again_In_2025'] = 0
+
+# Also create Gave_Again_In_2024 for backward compatibility
+print(f"   📊 Creating 'Gave_Again_In_2024' from giving history (backward compatibility)...")
+try:
+    giving_2024 = giving_df[(giving_df['Gift_Date'] >= '2024-01-01') & (giving_df['Gift_Date'] < '2025-01-01')].copy()
     if 'Donor_ID' in giving_2024.columns:
         donors_2024 = giving_2024['Donor_ID'].unique()
     elif 'ID' in giving_2024.columns:
@@ -498,13 +595,11 @@ try:
         raise ValueError("Could not find Donor_ID or ID column in giving history")
     
     donors_df['Gave_Again_In_2024'] = donors_df['ID'].isin(donors_2024).astype(int)
-    pos_count = donors_df['Gave_Again_In_2024'].sum()
-    pos_rate = donors_df['Gave_Again_In_2024'].mean()
-    print(f"   ✅ 'Gave_Again_In_2024' column created ({pos_count:,} donors gave again, {pos_rate:.1%})")
+    pos_count_2024 = donors_df['Gave_Again_In_2024'].sum()
+    pos_rate_2024 = donors_df['Gave_Again_In_2024'].mean()
+    print(f"   ✅ 'Gave_Again_In_2024' column created ({pos_count_2024:,} donors gave again, {pos_rate_2024:.1%})")
 except Exception as e:
-    print(f"   ❌ ERROR creating 'Gave_Again_In_2024': {e}")
-    print(f"   ⚠️  Dashboard metrics will be unavailable without this column!")
-    # Create empty column as fallback
+    print(f"   ⚠️  Could not create 'Gave_Again_In_2024': {e}")
     donors_df['Gave_Again_In_2024'] = 0
 
 # Save updated parquet file

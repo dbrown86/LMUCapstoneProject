@@ -30,10 +30,13 @@ def filter_dataframe(df: pd.DataFrame, regions: list, donor_types: list, segment
         pd.DataFrame: Filtered dataframe
     """
     if use_cache and STREAMLIT_AVAILABLE:
-        @st.cache_data
-        def _filter_cached(df, regions_tuple, donor_types_tuple, segments_tuple):
+        @st.cache_data(ttl=3600, show_spinner=False, max_entries=50)  # Cache for 1 hour, up to 50 filter combinations
+        def _filter_cached(df_hash, regions_tuple, donor_types_tuple, segments_tuple):
+            # Use hash of dataframe shape/columns as key instead of full dataframe
             return _filter_dataframe_internal(df, list(regions_tuple), list(donor_types_tuple), list(segments_tuple))
-        return _filter_cached(df, tuple(regions) if regions else (), tuple(donor_types) if donor_types else (), tuple(segments) if segments else ())
+        # Create hash from dataframe metadata for efficient caching
+        df_hash = hash((len(df), tuple(df.columns), df.shape))
+        return _filter_cached(df_hash, tuple(regions) if regions else (), tuple(donor_types) if donor_types else (), tuple(segments) if segments else ())
     else:
         return _filter_dataframe_internal(df, regions, donor_types, segments)
 
@@ -62,10 +65,11 @@ def get_segment_stats(df: pd.DataFrame, use_cache: bool = True) -> pd.DataFrame:
         pd.DataFrame: Statistics by segment
     """
     if use_cache and STREAMLIT_AVAILABLE:
-        @st.cache_data
-        def _get_cached():
+        @st.cache_data(ttl=3600, show_spinner=False)
+        def _get_cached(df_hash):
             return _get_segment_stats_internal(df)
-        return _get_cached()
+        df_hash = hash((len(df), tuple(df.columns), df.shape))
+        return _get_cached(df_hash)
     else:
         return _get_segment_stats_internal(df)
 
