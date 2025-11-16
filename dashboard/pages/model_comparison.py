@@ -63,15 +63,19 @@ def render(df: pd.DataFrame):
     fusion_recall = actual_metrics.get('recall')  # Keep None if not available
     fusion_specificity = actual_metrics.get('specificity')  # Keep None if not available
     
+    # CRITICAL: Use 2025 columns - prioritize Gave_Again_In_2025 and Will_Give_Again_Probability
+    outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else 'actual_gave')
+    prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
+    
     # Try to compute fusion metrics from data if not in saved metrics
-    if (fusion_f1 is None or fusion_precision is None or fusion_recall is None) and 'actual_gave' in df.columns and 'predicted_prob' in df.columns:
+    if (fusion_f1 is None or fusion_precision is None or fusion_recall is None) and outcome_col in df.columns and prob_col in df.columns:
         try:
             from sklearn.metrics import f1_score, precision_score, recall_score
             saved_meta = try_load_saved_metrics() or {}
             threshold = saved_meta.get('optimal_threshold', 0.5)
             
-            y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
-            y_prob_series = pd.to_numeric(df['predicted_prob'], errors='coerce')
+            y_true_series = pd.to_numeric(df[outcome_col], errors='coerce')
+            y_prob_series = pd.to_numeric(df[prob_col], errors='coerce')
             valid_mask = y_true_series.notna() & y_prob_series.notna()
             y_true = y_true_series.loc[valid_mask].astype(int).values
             y_prob = np.clip(y_prob_series.loc[valid_mask].astype(float).values, 0, 1)
@@ -97,10 +101,10 @@ def render(df: pd.DataFrame):
     baseline_specificity = actual_metrics.get('baseline_specificity')
     
     # Recalculate if missing
-    if (baseline_f1 is None or baseline_precision is None or baseline_recall is None) and 'days_since_last' in df.columns and 'actual_gave' in df.columns:
+    if (baseline_f1 is None or baseline_precision is None or baseline_recall is None) and 'days_since_last' in df.columns and outcome_col in df.columns:
         try:
             from sklearn.metrics import f1_score, precision_score, recall_score
-            y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
+            y_true_series = pd.to_numeric(df[outcome_col], errors='coerce')
             days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
             mask = y_true_series.notna() & days_series.notna()
             y_true = y_true_series.loc[mask].astype(int).values
@@ -145,11 +149,11 @@ def render(df: pd.DataFrame):
     with col1:
         if performance_gain is not None:
             st.markdown(f"""
-            <div class="metric-card" style="border-left-color: #2ecc71;">
+            <div class="metric-card" style="border-left-color: #2ecc71; background: linear-gradient(135deg, #e8f9f0 0%, #d5f4e6 100%);">
                 <div class="metric-icon">🏆</div>
                 <div class="metric-label">Performance Gain</div>
-                <div class="metric-value" style="color: #2ecc71;">+{performance_gain:.1f}%</div>
-                <div class="metric-delta" style="background: #d5f4e6; color: #27ae60;">
+                <div class="metric-value" style="color: #145a32;">+{performance_gain:.1f}%</div>
+                <div class="metric-delta" style="background: rgba(255,255,255,0.2); color: #145a32;">
                     vs. Baseline
                 </div>
             </div>
@@ -160,11 +164,11 @@ def render(df: pd.DataFrame):
     with col2:
         if lift_display != "N/A":
             st.markdown(f"""
-            <div class="metric-card" style="border-left-color: #3498db;">
+            <div class="metric-card" style="border-left-color: #3498db; background: linear-gradient(135deg, #e8f4fb 0%, #d6eaf8 100%);">
                 <div class="metric-icon">📈</div>
                 <div class="metric-label">Lift vs Baseline</div>
-                <div class="metric-value" style="color: #3498db;">{lift_display}</div>
-                <div class="metric-delta" style="background: #d6eaf8; color: #2874a6;">
+                <div class="metric-value" style="color: #1b4f72;">{lift_display}</div>
+                <div class="metric-delta" style="background: rgba(255,255,255,0.2); color: #1b4f72;">
                     AUC Improvement
                 </div>
             </div>
@@ -176,10 +180,10 @@ def render(df: pd.DataFrame):
         if fusion_accuracy is not None:
             baseline_accuracy = None
             # Try to calculate baseline accuracy if we have the data
-            if 'days_since_last' in df.columns and 'actual_gave' in df.columns:
+            if 'days_since_last' in df.columns and outcome_col in df.columns:
                 try:
                     from sklearn.metrics import accuracy_score
-                    y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
+                    y_true_series = pd.to_numeric(df[outcome_col], errors='coerce')
                     days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
                     mask = y_true_series.notna() & days_series.notna()
                     y_true = y_true_series.loc[mask].astype(int).values
@@ -195,22 +199,22 @@ def render(df: pd.DataFrame):
             if baseline_accuracy is not None:
                 accuracy_improvement = ((fusion_accuracy - baseline_accuracy) / baseline_accuracy * 100)
                 st.markdown(f"""
-                <div class="metric-card" style="border-left-color: #9b59b6;">
+                <div class="metric-card" style="border-left-color: #9b59b6; background: linear-gradient(135deg, #f4e9fb 0%, #ebdef0 100%);">
                     <div class="metric-icon">✅</div>
                     <div class="metric-label">Accuracy</div>
-                    <div class="metric-value" style="color: #9b59b6;">{fusion_accuracy:.1%}</div>
-                    <div class="metric-delta" style="background: #ebdef0; color: #7d3c98;">
+                    <div class="metric-value" style="color: #5b2c6f;">{fusion_accuracy:.1%}</div>
+                    <div class="metric-delta" style="background: rgba(255,255,255,0.2); color: #5b2c6f;">
                         +{accuracy_improvement:.1f}% vs Baseline
                     </div>
                 </div>
                 """, unsafe_allow_html=True)
             else:
                 st.markdown(f"""
-                <div class="metric-card" style="border-left-color: #9b59b6;">
+                <div class="metric-card" style="border-left-color: #9b59b6; background: linear-gradient(135deg, #f4e9fb 0%, #ebdef0 100%);">
                     <div class="metric-icon">✅</div>
                     <div class="metric-label">Fusion Accuracy</div>
-                    <div class="metric-value" style="color: #9b59b6;">{fusion_accuracy:.1%}</div>
-                    <div class="metric-delta" style="background: #ebdef0; color: #7d3c98;">
+                    <div class="metric-value" style="color: #5b2c6f;">{fusion_accuracy:.1%}</div>
+                    <div class="metric-delta" style="background: rgba(255,255,255,0.2); color: #5b2c6f;">
                         Actual Result
                     </div>
                 </div>
@@ -306,15 +310,15 @@ def render(df: pd.DataFrame):
     # 1b. BEFORE/AFTER SCENARIOS
     st.markdown("### 📊 Real-World Impact: Before & After Scenarios")
     
-    if 'actual_gave' in df.columns and 'predicted_prob' in df.columns:
-        # Calculate actual response rates
-        baseline_response_rate = df['actual_gave'].mean() if 'actual_gave' in df.columns else 0.17
+    if outcome_col in df.columns and prob_col in df.columns:
+        # Calculate actual response rates (using 2025 outcomes)
+        baseline_response_rate = df[outcome_col].mean() if outcome_col in df.columns else 0.17
         saved_meta = try_load_saved_metrics() or {}
         threshold = saved_meta.get('optimal_threshold', 0.5)
         
         # High probability group response rate
-        high_prob_donors = df[df['predicted_prob'] >= threshold]
-        fusion_response_rate = high_prob_donors['actual_gave'].mean() if len(high_prob_donors) > 0 else baseline_response_rate * 1.5
+        high_prob_donors = df[df[prob_col] >= threshold]
+        fusion_response_rate = high_prob_donors[outcome_col].mean() if len(high_prob_donors) > 0 else baseline_response_rate * 1.5
         
         # Scenario: Contact 10,000 donors
         scenario_contacts = 10000

@@ -36,10 +36,12 @@ def get_unique_values(df, use_cache: bool = True):
         dict: Dictionary with 'regions', 'types', and 'segments' lists
     """
     if use_cache and STREAMLIT_AVAILABLE:
-        @st.cache_data
-        def _get_cached():
+        @st.cache_data(ttl=7200, show_spinner=False)  # 2 hour cache, no spinner
+        def _get_cached(df_hash):
             return _get_unique_values_internal(df)
-        return _get_cached()
+        # Use hash of dataframe metadata for efficient caching
+        df_hash = hash((len(df), tuple(df.columns), df.shape))
+        return _get_cached(df_hash)
     else:
         return _get_unique_values_internal(df)
 
@@ -130,50 +132,15 @@ def render_sidebar(df) -> Tuple[str, List[str], List[str], List[str], float]:
     
     page = st.sidebar.radio(
         "Navigation",
-        ["🏠 Executive Summary", "🔬 Model Comparison", "💰 Business Impact", "💎 Donor Insights", 
-         "🔬 Features", "🎲 Predictions", "📈 Performance", "⚡ Take Action"],
+        ["🏠 Executive Summary", "🔬 Model Comparison", "💰 Business Impact", 
+         "🔬 Features", "📈 Performance", "⚡ Take Action", "📚 About"],
         label_visibility="collapsed"
     )
     
     st.sidebar.markdown("---")
     
-    # Filters
-    st.sidebar.markdown('<p class="filter-header">🔍 Filters</p>', unsafe_allow_html=True)
-    
-    # Get unique values from actual data (cached)
-    unique_vals = get_unique_values(df)
-    available_regions = unique_vals['regions']
-    available_types = unique_vals['types']
-    available_segments = unique_vals['segments']
-    
-    regions = st.sidebar.multiselect(
-        "Select Regions",
-        available_regions,
-        default=[]
-    )
-    
-    donor_types = st.sidebar.multiselect(
-        "Select Donor Types",
-        available_types,
-        default=[]
-    )
-    
-    segments = st.sidebar.multiselect(
-        "Select Segments",
-        available_segments,
-        default=[]
-    )
-    
-    prob_threshold = st.sidebar.slider(
-        "Prediction Threshold",
-        0.0, 1.0, 0.5, 0.05,
-        help="Minimum probability to classify as 'likely to give'"
-    )
-    
-    st.sidebar.markdown("---")
-    
     # Model Info - Calculate from actual data
-    st.sidebar.markdown('<p class="filter-header">📊 Model Info</p>', unsafe_allow_html=True)
+    st.sidebar.markdown('<p class="filter-header">📊 Multimodal Fusion Model</p>', unsafe_allow_html=True)
     
     metrics = get_model_metrics(df)
     
@@ -207,15 +174,10 @@ def render_sidebar(df) -> Tuple[str, List[str], List[str], List[str], float]:
     </div>
     """, unsafe_allow_html=True)
     
-    st.sidebar.markdown("---")
-    
-    # Export options
-    st.sidebar.markdown('<p class="filter-header">📤 Export</p>', unsafe_allow_html=True)
-    
-    if st.sidebar.button("📊 Export Dashboard", width='stretch'):
-        st.sidebar.success("✅ Dashboard exported!")
-    
-    if st.sidebar.button("📋 Copy Metrics", width='stretch'):
-        st.sidebar.info("📋 Metrics copied to clipboard!")
-    
+    # Filters removed from UI; use default (no filters, 0.5 threshold)
+    regions: List[str] = []
+    donor_types: List[str] = []
+    segments: List[str] = []
+    prob_threshold: float = 0.5
+
     return page, regions, donor_types, segments, prob_threshold

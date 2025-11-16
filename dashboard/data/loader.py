@@ -36,9 +36,9 @@ def load_full_dataset(use_cache: bool = True):
     Returns:
         pd.DataFrame: Processed donor dataset
     """
-    # Use Streamlit caching if available and requested
+    # Use Streamlit caching if available and requested - optimized for performance
     if use_cache and STREAMLIT_AVAILABLE:
-        @st.cache_data(show_spinner="Loading 500K donor dataset...", ttl=3600)
+        @st.cache_data(show_spinner=False, ttl=7200, max_entries=1)  # 2 hour cache, no spinner, single entry
         def _load_cached():
             return _load_full_dataset_internal()
         return _load_cached()
@@ -164,8 +164,11 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # Get column mapping from config
     column_mapping = settings.COLUMN_MAPPING.copy()
     
-    # CRITICAL: Check for Gave_Again_In_2024 BEFORE column mapping
+    # CRITICAL: Check for Gave_Again_In_2025 FIRST (primary target), then 2025 (fallback)
+    gave_again_2025 = None
     gave_again_2024 = None
+    if 'Gave_Again_In_2025' in df.columns:
+        gave_again_2025 = df['Gave_Again_In_2025'].copy()
     if 'Gave_Again_In_2024' in df.columns:
         gave_again_2024 = df['Gave_Again_In_2024'].copy()
     
@@ -254,14 +257,22 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             if df['predicted_prob'].max() > 1.0:
                 df['predicted_prob'] = df['predicted_prob'] / df['predicted_prob'].max()
     
-    # Handle actual_gave
-    if gave_again_2024 is not None:
+    # Handle actual_gave - prioritize 2025, fallback to 2025
+    if gave_again_2025 is not None:
+        df['actual_gave'] = gave_again_2025.astype(int)
+        df['Gave_Again_In_2025'] = gave_again_2025.copy()
+        # Keep 2025 for backward compatibility if it exists
+        if gave_again_2024 is not None:
+            df['Gave_Again_In_2024'] = gave_again_2024.copy()
+    elif gave_again_2024 is not None:
         df['actual_gave'] = gave_again_2024.astype(int)
         df['Gave_Again_In_2024'] = gave_again_2024.copy()
+    elif 'Gave_Again_In_2025' in df.columns:
+        df['actual_gave'] = df['Gave_Again_In_2025'].astype(int)
     elif 'Gave_Again_In_2024' in df.columns:
         df['actual_gave'] = df['Gave_Again_In_2024'].astype(int)
     elif 'actual_gave' not in df.columns:
-        # Try to compute from giving_history
+        # Try to compute from giving_history (prioritize 2025, fallback to 2025)
         try:
             giving_paths = settings.get_data_paths()['giving_paths']
             giving_df = None
@@ -273,14 +284,24 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
                     break
             
             if giving_df is not None and 'Gift_Date' in giving_df.columns:
-                giving_2024 = giving_df[giving_df['Gift_Date'] >= '2024-01-01'].copy()
-                donors_2024 = giving_2024['Donor_ID'].unique() if 'Donor_ID' in giving_2024.columns else []
+                # Try 2025 first
+                giving_2025 = giving_df[giving_df['Gift_Date'] >= '2025-01-01'].copy()
+                donors_2025 = giving_2025['Donor_ID'].unique() if 'Donor_ID' in giving_2025.columns else []
                 donor_id_col = next((c for c in ['ID', 'Donor_ID', 'donor_id'] if c in df.columns), None)
-                if donor_id_col and len(donors_2024) > 0:
-                    df['actual_gave'] = df[donor_id_col].isin(donors_2024).astype(int)
-                    df['Gave_Again_In_2024'] = df['actual_gave'].copy()
+                
+                if donor_id_col and len(donors_2025) > 0:
+                    df['actual_gave'] = df[donor_id_col].isin(donors_2025).astype(int)
+                    df['Gave_Again_In_2025'] = df['actual_gave'].copy()
                 else:
-                    df['actual_gave'] = np.random.binomial(1, 0.17, len(df))
+                    # Fallback to 2025
+                    giving_2024 = giving_df[giving_df['Gift_Date'] >= '2025-01-01'].copy()
+                    giving_2024 = giving_2024[giving_2024['Gift_Date'] < '2025-01-01']
+                    donors_2024 = giving_2024['Donor_ID'].unique() if 'Donor_ID' in giving_2024.columns else []
+                    if donor_id_col and len(donors_2024) > 0:
+                        df['actual_gave'] = df[donor_id_col].isin(donors_2024).astype(int)
+                        df['Gave_Again_In_2024'] = df['actual_gave'].copy()
+                    else:
+                        df['actual_gave'] = np.random.binomial(1, 0.17, len(df))
             else:
                 df['actual_gave'] = np.random.binomial(1, 0.17, len(df))
         except Exception:

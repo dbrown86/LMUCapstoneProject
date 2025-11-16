@@ -2,10 +2,10 @@
 Simplified Single-Target "Will Give Again" Prediction
 =====================================================
 
-This script predicts which donors will give ANY amount in 2024 (2021-2023 training).
+This script predicts which donors will give ANY amount in 2025 (2021-2024 training).
 This is a learnable target with realistic business value.
 
-Target: Will Give Again in 2024 (positive if gave in 2024, negative otherwise)
+Target: Will Give Again in 2025 (positive if gave in 2025, negative otherwise)
 Features: Recency, engagement, capacity, network, temporal, giving history
 Architecture: Multimodal fusion with GNN (tabular + sequence + network + text + GNN)
 Advantages: Learnable pattern, interpretable, high business value, realistic class balance
@@ -306,7 +306,7 @@ class ImprovedSequenceEncoder(nn.Module):
 class SingleTargetInfluentialModel(nn.Module):
     """
     Multimodal model for "will give again" prediction.
-    Predicts which donors will give ANY amount in 2024.
+    Predicts which donors will give ANY amount in 2025.
     Supports both standard MLP and Transformer architectures.
     """
     def __init__(self, tabular_dim, sequence_dim, network_dim, text_dim, hidden_dim=128, dropout=0.5, use_transformer=False, use_gnn=None):
@@ -443,46 +443,46 @@ def create_major_donor_target(donors_df, giving_df, relationships_df=None):
     """
     Create "will give again" target based on giving history.
     
-    CHANGED TARGET: Donors who will give ANY amount in 2024
-    Logic: Positive if donor gave in 2024
+    CHANGED TARGET: Donors who will give ANY amount in 2025
+    Logic: Positive if donor gave in 2025
     
     This is more learnable than predicting $5K+ threshold
-    Expected positive rate: 15-25%
+    Expected positive rate: 3-5% (lower than 2024 due to partial year)
     Expected AUC: 65-75% (vs 48-52% for $5K threshold)
     """
     print("\n📊 Creating 'will give again' target...")
-    print("   🎯 Target: Donors who will give ANY amount in 2024")
+    print("   🎯 Target: Donors who will give ANY amount in 2025")
     
-    # Get 2024 giving data for target labels
-    giving_2024 = giving_df[giving_df['Gift_Date'] >= '2024-01-01'].copy()
+    # Get 2025 giving data for target labels
+    giving_2025 = giving_df[giving_df['Gift_Date'] >= '2025-01-01'].copy()
     
-    # Create target: did the donor give in 2024?
+    # Create target: did the donor give in 2025?
     # OPTIMIZED: Use vectorized operations with merge
     target_df = pd.DataFrame({'ID': donors_df['ID'].values})
     
-    # Get unique donors who gave in 2024
-    donors_2024 = giving_2024['Donor_ID'].unique()
+    # Get unique donors who gave in 2025
+    donors_2025 = giving_2025['Donor_ID'].unique()
     
     # Vectorized target creation
-    target = target_df['ID'].isin(donors_2024).astype(int).values
+    target = target_df['ID'].isin(donors_2025).astype(int).values
     
     target_array = np.array(target)
     pos_rate = target_array.mean()
-    print(f"   ✅ Donors who gave in 2024: {target_array.sum():,} ({pos_rate:.1%})")
+    print(f"   ✅ Donors who gave in 2025: {target_array.sum():,} ({pos_rate:.1%})")
     
     # DIAGNOSTIC CHECKS
     print("\n🔍 TARGET DIAGNOSTICS:")
-    historical_giving = giving_df[giving_df['Gift_Date'] < '2024-01-01']
-    print(f"   • Historical giving (2021-2023) range: ${historical_giving['Gift_Amount'].min():.2f} - ${historical_giving['Gift_Amount'].max():,.2f}")
+    historical_giving = giving_df[giving_df['Gift_Date'] < '2025-01-01']
+    print(f"   • Historical giving (2021-2024) range: ${historical_giving['Gift_Amount'].min():.2f} - ${historical_giving['Gift_Amount'].max():,.2f}")
     print(f"   • Historical giving mean: ${historical_giving['Gift_Amount'].mean():.2f}")
     print(f"   • Historical giving median: ${historical_giving['Gift_Amount'].median():.2f}")
-    print(f"   • 2024 giving records: {len(giving_2024):,}")
-    print(f"   • Unique donors in 2024: {len(donors_2024):,}")
+    print(f"   • 2025 giving records: {len(giving_2025):,}")
+    print(f"   • Unique donors in 2025: {len(donors_2025):,}")
     
-    # Sample of 2024 giving
-    print(f"\n   Sample 2024 giving (top 5 donors by amount):")
-    top_2024_donors = giving_2024.groupby('Donor_ID')['Gift_Amount'].sum().nlargest(5)
-    print(top_2024_donors)
+    # Sample of 2025 giving
+    print(f"\n   Sample 2025 giving (top 5 donors by amount):")
+    top_2025_donors = giving_2025.groupby('Donor_ID')['Gift_Amount'].sum().nlargest(5)
+    print(top_2025_donors)
     
     return target_array
 
@@ -1636,9 +1636,9 @@ def main():
     giving_df['Gift_Date'] = pd.to_datetime(giving_df['Gift_Date'])
     print(f"   • Total giving records: {len(giving_df):,}")
     
-    # TEMPORAL FILTER: Only use historical data (before 2024)
-    historical_giving = giving_df[giving_df['Gift_Date'] < '2024-01-01'].copy()
-    print(f"   • Historical giving (pre-2024): {len(historical_giving):,}")
+    # TEMPORAL FILTER: Only use historical data (before 2025)
+    historical_giving = giving_df[giving_df['Gift_Date'] < '2025-01-01'].copy()
+    print(f"   • Historical giving (pre-2025): {len(historical_giving):,}")
     print("   🛡️  Using ONLY historical data to prevent leakage")
     
     # Filter giving to subset if using subset
@@ -1662,7 +1662,7 @@ def main():
         contact_reports_path = 'data/parquet_export/contact_reports.parquet'
         contact_reports_df = pd.read_parquet(contact_reports_path)
         contact_reports_df['Contact_Date'] = pd.to_datetime(contact_reports_df['Contact_Date'])
-        contact_reports_df = contact_reports_df[contact_reports_df['Contact_Date'] < '2024-01-01'].copy()
+        contact_reports_df = contact_reports_df[contact_reports_df['Contact_Date'] < '2025-01-01'].copy()
         print("   🛡️  Filtered contact reports to historical only")
         print(f"   • Total contact reports: {len(contact_reports_df):,}")
         
@@ -2501,6 +2501,15 @@ def main():
     importance_df.to_csv('results/feature_importance_influential_donor.csv', index=False)
     print(f"   ✅ Feature importance saved to results/feature_importance_influential_donor.csv")
     
+    # CRITICAL: Also save the actual 60 features used during training
+    # This is needed for inference to match exactly
+    selected_features_df = pd.DataFrame({
+        'feature': tabular_cols,
+        'order': range(len(tabular_cols))
+    })
+    selected_features_df.to_csv('results/selected_features_60.csv', index=False)
+    print(f"   ✅ Selected 60 features saved to results/selected_features_60.csv")
+    
     # Final summary
     total_time = time.time() - start_time
     
@@ -2510,7 +2519,7 @@ def main():
     
     print(f"\n⏱️  Total Time: {total_time/60:.1f} minutes")
     print(f"📊 Dataset: {len(donors_df):,} donors")
-    print(f"🎯 Target: Will Give Again in 2024")
+    print(f"🎯 Target: Will Give Again in 2025")
     print(f"🔧 Features: {len(tabular_cols)}")
     print(f"🧠 Model: Single-target multimodal with GNN")
     

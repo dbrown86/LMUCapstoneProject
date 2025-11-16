@@ -94,11 +94,19 @@ def render(df: pd.DataFrame):
     st.markdown("#### 📊 Feature Importance (Correlation with Target)")
     
     # Show which outcome column is being used
-    outcome_col = 'Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else ('actual_gave' if 'actual_gave' in df.columns else None)
+    outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else ('actual_gave' if 'actual_gave' in df.columns else None))
     if outcome_col:
-        outcome_name = 'Gave_Again_In_2024' if outcome_col == 'Gave_Again_In_2024' else 'actual_gave'
+        if outcome_col == 'Gave_Again_In_2025':
+            outcome_name = 'Gave_Again_In_2025'
+            year = '2025'
+        elif outcome_col == 'Gave_Again_In_2024':
+            outcome_name = 'Gave_Again_In_2024'
+            year = '2025'
+        else:
+            outcome_name = 'actual_gave'
+            year = ''
         st.caption(f"💡 **Note**: Feature importance is calculated as correlation with '{outcome_name}' outcome from the multi-modal fusion model dataset. "
-                   f"Higher correlation indicates stronger predictive power for identifying donors who gave again in 2024.")
+                   f"Higher correlation indicates stronger predictive power for identifying donors who gave again in {year}.")
     
     # Validate feature importance data before plotting
     if feature_importance is None or len(feature_importance) == 0:
@@ -155,12 +163,26 @@ def render(df: pd.DataFrame):
     st.markdown("Select a feature to see how it relates to donor outcomes")
     
     # Get feature columns for analysis (use same logic as feature importance)
-    outcome_col = 'Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else ('actual_gave' if 'actual_gave' in df.columns else None)
+    outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else ('actual_gave' if 'actual_gave' in df.columns else None))
     
     if outcome_col and len(feature_importance) > 0 and 'feature' in feature_importance.columns:
         # Use top features from importance chart for selection
         # Remove duplicates to prevent showing same feature twice
         top_features = feature_importance['feature'].head(10).drop_duplicates().tolist()
+
+        # If a "Gave Again in 2024" prediction / outcome field is present in the list,
+        # prefer the 2025 version in the dropdown so analysis focuses on 2025.
+        replacements = [
+            ('Gave_Again_In_2024', 'Gave_Again_In_2025'),
+            ('Gave Again in 2024', 'Gave Again in 2025')
+        ]
+        for old_name, new_name in replacements:
+            if old_name in top_features and new_name in df.columns:
+                top_features = [new_name if f == old_name else f for f in top_features]
+
+        # De-duplicate again in case replacement introduced duplicates
+        top_features = list(dict.fromkeys(top_features))
+
         if len(top_features) > 0:
             selected_feature = st.selectbox("Select Feature to Analyze", top_features, key="feature_analysis")
         else:

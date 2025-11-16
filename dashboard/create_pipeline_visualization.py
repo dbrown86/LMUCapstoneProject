@@ -425,7 +425,7 @@ HTML_CONTENT = """<!DOCTYPE html>
                     <div class="details">
                         <div class="detail-item">
                             <div class="detail-title">Data Split</div>
-                            <div class="detail-subtitle">2021-2023</div>
+                            <div class="detail-subtitle">2021-2025</div>
                         </div>
                         <div class="detail-item">
                             <div class="detail-title">GNN Training</div>

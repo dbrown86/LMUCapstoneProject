@@ -63,10 +63,14 @@ def render(df: pd.DataFrame):
     threshold = saved_meta.get('optimal_threshold', 0.5)
     metrics['optimal_threshold'] = threshold
     
+    # CRITICAL: Use 2025 columns - prioritize Gave_Again_In_2025 and Will_Give_Again_Probability
+    outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else 'actual_gave')
+    prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
+    
     # Compute accuracy and precision/recall if not in saved metrics and we have data
-    if metrics.get('accuracy') is None and 'actual_gave' in df.columns and 'predicted_prob' in df.columns:
-        y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
-        y_prob_series = pd.to_numeric(df['predicted_prob'], errors='coerce')
+    if metrics.get('accuracy') is None and outcome_col in df.columns and prob_col in df.columns:
+        y_true_series = pd.to_numeric(df[outcome_col], errors='coerce')
+        y_prob_series = pd.to_numeric(df[prob_col], errors='coerce')
         valid_mask = y_true_series.notna() & y_prob_series.notna()
         y_true = y_true_series.loc[valid_mask].astype(int).values
         y_prob = np.clip(y_prob_series.loc[valid_mask].astype(float).values, 0, 1)
@@ -79,8 +83,8 @@ def render(df: pd.DataFrame):
             if metrics.get('recall') is None:
                 metrics['recall'] = recall_score(y_true, y_pred, zero_division=0)
     
-    # Metric cards
-    col1, col2, col3, col4 = st.columns(4)
+    # Metric cards (AUC, F1, Accuracy)
+    col1, col2, col3 = st.columns(3)
     
     with col1:
         auc_display = f"{metrics['auc']:.2%}" if metrics['auc'] is not None else "N/A"
@@ -109,15 +113,6 @@ def render(df: pd.DataFrame):
         </div>
         """, unsafe_allow_html=True)
     
-    with col4:
-        lift_display = f"+{metrics['lift']:.1%}" if metrics['lift'] is not None else "N/A"
-        st.markdown(f"""
-        <div class="metric-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-left: none; min-height: 160px; display: flex; flex-direction: column; justify-content: center; align-items: center;">
-            <div class="metric-label" style="color: white; margin-bottom: 10px;">Lift vs Baseline</div>
-            <div class="metric-value" style="color: white; text-align: center;">{lift_display}</div>
-        </div>
-        """, unsafe_allow_html=True)
-    
     st.markdown("<br>", unsafe_allow_html=True)
     
     # Only show ROC curve if metrics are available
@@ -125,10 +120,10 @@ def render(df: pd.DataFrame):
         st.markdown('<div class="chart-container">', unsafe_allow_html=True)
         st.markdown("#### 📊 ROC Curve Analysis")
         
-        # Generate ROC curve data from actual predictions
-        if 'actual_gave' in df.columns and 'predicted_prob' in df.columns:
-            y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
-            y_prob_series = pd.to_numeric(df['predicted_prob'], errors='coerce')
+        # Generate ROC curve data from actual predictions (using 2025 columns)
+        if outcome_col in df.columns and prob_col in df.columns:
+            y_true_series = pd.to_numeric(df[outcome_col], errors='coerce')
+            y_prob_series = pd.to_numeric(df[prob_col], errors='coerce')
             valid_mask = y_true_series.notna() & y_prob_series.notna()
             y_true = y_true_series.loc[valid_mask].astype(int)
             y_prob = np.clip(y_prob_series.loc[valid_mask].astype(float), 0, 1)
@@ -185,15 +180,15 @@ def render(df: pd.DataFrame):
             plotly_chart_silent(fig, config={'displayModeBar': True, 'displaylogo': False})
         st.markdown('</div>', unsafe_allow_html=True)
     else:
-        st.info("ROC curve requires 'actual_gave' and 'predicted_prob' columns in the dataset")
+        st.info(f"ROC curve requires '{outcome_col}' and '{prob_col}' columns in the dataset")
 
     # Precision-Recall Curve
     if metrics.get('precision') is not None and metrics.get('recall') is not None:
         st.markdown("### 📊 Precision-Recall Curve")
         try:
-            if 'actual_gave' in df.columns and 'predicted_prob' in df.columns:
-                y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
-                y_prob_series = pd.to_numeric(df['predicted_prob'], errors='coerce')
+            if outcome_col in df.columns and prob_col in df.columns:
+                y_true_series = pd.to_numeric(df[outcome_col], errors='coerce')
+                y_prob_series = pd.to_numeric(df[prob_col], errors='coerce')
                 valid_mask = y_true_series.notna() & y_prob_series.notna()
                 y_true = y_true_series.loc[valid_mask].astype(int).values
                 y_prob = np.clip(y_prob_series.loc[valid_mask].astype(float).values, 0, 1)
@@ -232,9 +227,9 @@ def render(df: pd.DataFrame):
     # Confusion Matrix
     st.markdown("### 🎲 Confusion Matrix")
     try:
-        if 'actual_gave' in df.columns and 'predicted_prob' in df.columns:
-            y_true_series = pd.to_numeric(df['actual_gave'], errors='coerce')
-            y_prob_series = pd.to_numeric(df['predicted_prob'], errors='coerce')
+        if outcome_col in df.columns and prob_col in df.columns:
+            y_true_series = pd.to_numeric(df[outcome_col], errors='coerce')
+            y_prob_series = pd.to_numeric(df[prob_col], errors='coerce')
             valid_mask = y_true_series.notna() & y_prob_series.notna()
             y_true = y_true_series.loc[valid_mask].astype(int).values
             thresh_val = float(metrics.get('optimal_threshold', 0.5))
@@ -254,7 +249,7 @@ def render(df: pd.DataFrame):
                 fig_cm.update_layout(title='Confusion Matrix', height=400)
                 plotly_chart_silent(fig_cm, config={'displayModeBar': True, 'displaylogo': False})
         else:
-            st.info("Confusion matrix requires 'actual_gave' and 'predicted_prob' columns.")
+            st.info(f"Confusion matrix requires '{outcome_col}' and '{prob_col}' columns.")
     except Exception as e:
         st.warning(f"Could not render confusion matrix: {e}")
     fusion_precision = metrics.get('precision')
@@ -299,54 +294,3 @@ def render(df: pd.DataFrame):
         - **Higher precision means less waste**: {fusion_precision:.1%} of our Fusion predictions are correct vs {baseline_precision:.1%} with baseline
         """)
      
-    # Model Monitoring (brief)
-    st.markdown("### 🔍 Model Health & Monitoring")
-    
-    col1, col2 = st.columns(2)
-    
-    with col1:
-        st.markdown("#### ✅ Performance Checks")
-        # Check data quality
-        if 'predicted_prob' in df.columns:
-            missing_preds = df['predicted_prob'].isna().sum()
-            out_of_range = ((df['predicted_prob'] < 0) | (df['predicted_prob'] > 1)).sum()
-            
-            if missing_preds == 0 and out_of_range == 0:
-                st.success("✅ All predictions are valid (no missing or out-of-range values)")
-            else:
-                st.warning(f"⚠️ Found {missing_preds} missing predictions and {out_of_range} out-of-range values")
-        
-        # Check for data drift (simplified)
-        if 'predicted_prob' in df.columns:
-            recent_auc = metrics.get('auc', 0.95)
-            baseline_auc = metrics.get('baseline_auc')
-            if baseline_auc is not None and baseline_auc > 0:
-                performance_ratio = recent_auc / baseline_auc
-            else:
-                performance_ratio = 1
-            
-            if baseline_auc is None:
-                st.info(f"ℹ️ Model performance: {recent_auc:.2%} AUC (baseline comparison unavailable)")
-            elif performance_ratio >= 0.95:
-                st.success(f"✅ Model performance stable ({recent_auc:.2%} AUC)")
-            else:
-                st.warning(f"⚠️ Performance may be degrading ({recent_auc:.2%} AUC, {performance_ratio:.1%} of baseline)")
-    
-    with col2:
-        st.markdown("#### 📊 Data Summary")
-        avg_pred_numeric = df['predicted_prob'].mean() if 'predicted_prob' in df.columns and df['predicted_prob'].notna().any() else None
-        summary_data = {
-            'Metric': ['Total Donors', 'Has Predictions', 'Has Outcomes', 'Avg Prediction'],
-            'Value': [
-                len(df),
-                (df['predicted_prob'].notna().sum() if 'predicted_prob' in df.columns else 0),
-                (df['actual_gave'].notna().sum() if 'actual_gave' in df.columns else 0),
-                avg_pred_numeric if avg_pred_numeric is not None else 0
-            ]
-        }
-        summary_df = pd.DataFrame(summary_data)
-        summary_display = summary_df.copy()
-        if avg_pred_numeric is not None:
-            summary_display.loc[summary_display['Metric'] == 'Avg Prediction', 'Value'] = f"{avg_pred_numeric:.2%}"
-        st.dataframe(summary_display, width='stretch', hide_index=True)
-

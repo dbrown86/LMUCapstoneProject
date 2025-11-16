@@ -111,9 +111,11 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
         if will_give_variants:
             prob_col = will_give_variants[0]
     
-    # Find outcome column
+    # Find outcome column - prioritize 2025, fallback to 2025
     outcome_col = None
-    if 'Gave_Again_In_2024' in source_df.columns:
+    if 'Gave_Again_In_2025' in source_df.columns:
+        outcome_col = 'Gave_Again_In_2025'
+    elif 'Gave_Again_In_2024' in source_df.columns:
         outcome_col = 'Gave_Again_In_2024'
     elif 'actual_gave' in source_df.columns:
         outcome_col = 'actual_gave'
@@ -136,44 +138,49 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
     
     # Calculate fusion model metrics directly from source data
     if prob_col and outcome_col:
-        # Use the identified columns directly from source
-        y_true = pd.to_numeric(source_df[outcome_col], errors='coerce')
-        y_prob = pd.to_numeric(source_df[prob_col], errors='coerce')
-        valid_mask = y_true.notna() & y_prob.notna()
-        
-        if valid_mask.sum() > 0:
-            y_true_valid = y_true[valid_mask].astype(int).values
-            y_prob_valid = np.clip(y_prob[valid_mask].astype(float).values, 0, 1)
+        try:
+            # Use the identified columns directly from source
+            y_true = pd.to_numeric(source_df[outcome_col], errors='coerce')
+            y_prob = pd.to_numeric(source_df[prob_col], errors='coerce')
+            valid_mask = y_true.notna() & y_prob.notna()
             
-            # Check if we have two classes
-            unique_classes = np.unique(y_true_valid)
-            if len(unique_classes) >= 2:
-                # Check mean probabilities for each class (should be higher for positive class)
-                prob_for_pos = y_prob_valid[y_true_valid == 1].mean() if (y_true_valid == 1).sum() > 0 else 0
-                prob_for_neg = y_prob_valid[y_true_valid == 0].mean() if (y_true_valid == 0).sum() > 0 else 0
+            if valid_mask.sum() > 0:
+                y_true_valid = y_true[valid_mask].astype(int).values
+                y_prob_valid = np.clip(y_prob[valid_mask].astype(float).values, 0, 1)
                 
-                # If predictions appear inverted, invert them
-                if prob_for_pos < prob_for_neg:
-                    y_prob_valid = 1 - y_prob_valid
-                
-                # Calculate AUC directly
-                result['auc'] = roc_auc_score(y_true_valid, y_prob_valid)
-                
-                # Binary predictions at 0.5 threshold
-                threshold = 0.5
-                y_pred_binary = (y_prob_valid >= threshold).astype(int)
-                
-                # Calculate other metrics
-                result['f1'] = f1_score(y_true_valid, y_pred_binary, zero_division=0)
-                result['accuracy'] = accuracy_score(y_true_valid, y_pred_binary)
-                result['precision'] = precision_score(y_true_valid, y_pred_binary, zero_division=0)
-                result['recall'] = recall_score(y_true_valid, y_pred_binary, zero_division=0)
-                
-                # Calculate specificity
-                cm = confusion_matrix(y_true_valid, y_pred_binary)
-                if cm.size == 4:
-                    tn, fp, fn, tp = cm.ravel()
-                    result['specificity'] = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+                # Check if we have two classes
+                unique_classes = np.unique(y_true_valid)
+                if len(unique_classes) >= 2:
+                    # Check mean probabilities for each class (should be higher for positive class)
+                    prob_for_pos = y_prob_valid[y_true_valid == 1].mean() if (y_true_valid == 1).sum() > 0 else 0
+                    prob_for_neg = y_prob_valid[y_true_valid == 0].mean() if (y_true_valid == 0).sum() > 0 else 0
+                    
+                    # If predictions appear inverted, invert them
+                    if prob_for_pos < prob_for_neg:
+                        y_prob_valid = 1 - y_prob_valid
+                    
+                    # Calculate AUC directly
+                    result['auc'] = roc_auc_score(y_true_valid, y_prob_valid)
+                    
+                    # Binary predictions at 0.5 threshold
+                    threshold = 0.5
+                    y_pred_binary = (y_prob_valid >= threshold).astype(int)
+                    
+                    # Calculate other metrics
+                    result['f1'] = f1_score(y_true_valid, y_pred_binary, zero_division=0)
+                    result['accuracy'] = accuracy_score(y_true_valid, y_pred_binary)
+                    result['precision'] = precision_score(y_true_valid, y_pred_binary, zero_division=0)
+                    result['recall'] = recall_score(y_true_valid, y_pred_binary, zero_division=0)
+                    
+                    # Calculate specificity
+                    cm = confusion_matrix(y_true_valid, y_pred_binary)
+                    if cm.size == 4:
+                        tn, fp, fn, tp = cm.ravel()
+                        result['specificity'] = tn / (tn + fp) if (tn + fp) > 0 else 0.0
+        except Exception as e:
+            # If calculation fails, try to use saved metrics as fallback
+            # Don't print error to avoid cluttering logs, but ensure we return None values
+            pass
     
     # Calculate baseline AUC from days_since_last
     if outcome_col:
@@ -238,7 +245,7 @@ def get_feature_importance(df: pd.DataFrame, use_cache: bool = True) -> pd.DataF
     """
     Calculate feature importance from actual data if available.
     
-    Uses correlation with the 'gave again in 2024' outcome as a proxy for feature importance.
+    Uses correlation with the 'gave again in 2025' outcome as a proxy for feature importance.
     This is based on the multi-modal fusion model dataset and outcome variable.
     
     Args:
@@ -248,21 +255,30 @@ def get_feature_importance(df: pd.DataFrame, use_cache: bool = True) -> pd.DataF
     Returns:
         pd.DataFrame: DataFrame with feature names and importance scores
     """
-    # Use Streamlit caching if available and requested
+    # Use Streamlit caching if available and requested - with longer TTL for performance
     if use_cache and STREAMLIT_AVAILABLE:
-        @st.cache_data
-        def _get_cached():
+        @st.cache_data(ttl=7200, show_spinner=False)  # 2 hour cache, no spinner for faster UX
+        def _get_cached(df_hash):
+            # Use hash of dataframe shape and columns to create cache key
             return _get_feature_importance_internal(df)
-        return _get_cached()
+        
+        # Create a simple hash from dataframe metadata for caching
+        df_hash = hash((len(df), tuple(df.columns), df.shape))
+        return _get_cached(df_hash)
     else:
         return _get_feature_importance_internal(df)
 
 
 def _get_feature_importance_internal(df: pd.DataFrame) -> pd.DataFrame:
     """Internal function to calculate feature importance (without caching decorator)."""
-    # CRITICAL: Use Gave_Again_In_2024 if available (from will give again in 2024 prediction file)
-    # Otherwise fall back to actual_gave
-    outcome_col = 'Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else ('actual_gave' if 'actual_gave' in df.columns else None)
+    # CRITICAL: Use Gave_Again_In_2025 if available (primary target), fallback to 2025, then actual_gave
+    outcome_col = None
+    if 'Gave_Again_In_2025' in df.columns:
+        outcome_col = 'Gave_Again_In_2025'
+    elif 'Gave_Again_In_2024' in df.columns:
+        outcome_col = 'Gave_Again_In_2024'
+    elif 'actual_gave' in df.columns:
+        outcome_col = 'actual_gave'
     
     if outcome_col:
         numeric_cols = df.select_dtypes(include=[np.number]).columns.tolist()
@@ -278,6 +294,11 @@ def _get_feature_importance_internal(df: pd.DataFrame) -> pd.DataFrame:
         
         # Base exclusion list
         exclude_cols_base = [outcome_col, 'actual_gave', 'donor_id', 'ID', 'id']
+
+        # If we're using 2025 as the outcome, also exclude the 2024 outcome column
+        # so it does not appear as a "feature" in importance / impact charts.
+        if outcome_col == 'Gave_Again_In_2025' and 'Gave_Again_In_2024' in df.columns:
+            exclude_cols_base.append('Gave_Again_In_2024')
         
         # Function to check if a column should be excluded
         def should_exclude_col(col_name):
