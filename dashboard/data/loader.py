@@ -145,11 +145,19 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
                 pass  # Even sidebar messages can fail
         try:
             # Create clean environment dict for subprocess
-            # Don't modify os.environ - just create a clean dict for subprocess
-            # Explicitly exclude KAGGLE_USER_AGENT to prevent None errors
-            # Only include valid string values (filter out None and non-strings)
-            env = {k: v for k, v in os.environ.items() 
-                   if k != "KAGGLE_USER_AGENT" and v is not None and isinstance(v, str)}
+            # CRITICAL: Don't use os.environ directly - build from scratch to avoid KAGGLE_USER_AGENT issues
+            # Check Streamlit secrets first, then build env dict
+            env = {}
+            
+            # Copy environment variables, but exclude KAGGLE_USER_AGENT completely
+            for key, value in os.environ.items():
+                if key != "KAGGLE_USER_AGENT":
+                    # Only include valid string values
+                    if value is not None and isinstance(value, str):
+                        env[key] = value
+            
+            # Ensure KAGGLE_USER_AGENT is NOT in the env dict (double-check)
+            env.pop("KAGGLE_USER_AGENT", None)
             
             result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600, env=env)
             if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
@@ -852,19 +860,28 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # STEP 1: Preprocess gift officer column FIRST (before any other processing)
     # This ensures Primary_Manager is available for gift officer charts
     if 'Primary_Manager' not in df.columns:
-        # Check for gift officer columns in order of preference
-        gift_officer_cols = ['Gift Officer', 'Gift_Officer', 'gift_officer', 'GiftOfficer']
-        for col in gift_officer_cols:
+        # Check for gift officer columns - try exact matches first
+        gift_officer_exact = ['Gift Officer', 'Gift_Officer', 'gift_officer', 'GiftOfficer', 'Primary_Manager', 'Primary Manager']
+        found_col = None
+        for col in gift_officer_exact:
             if col in df.columns:
-                df = df.rename(columns={col: 'Primary_Manager'})
+                found_col = col
                 break
-        else:
-            # If exact match not found, search case-insensitively
+        
+        # If not found, search case-insensitively for any column containing gift/officer/manager
+        if not found_col:
             for col in df.columns:
-                col_lower = col.lower().strip()
-                if col_lower in ['gift officer', 'gift_officer', 'giftofficer']:
-                    df = df.rename(columns={col: 'Primary_Manager'})
+                col_lower = col.lower().strip().replace(' ', '_').replace('-', '_')
+                # Check for various patterns
+                if (col_lower in ['gift_officer', 'giftofficer', 'primary_manager', 'primarymanager'] or
+                    ('gift' in col_lower and 'officer' in col_lower) or
+                    ('primary' in col_lower and 'manager' in col_lower)):
+                    found_col = col
                     break
+        
+        # Rename the found column to Primary_Manager
+        if found_col:
+            df = df.rename(columns={found_col: 'Primary_Manager'})
     
     # Get column mapping from config
     column_mapping = settings.COLUMN_MAPPING.copy()
