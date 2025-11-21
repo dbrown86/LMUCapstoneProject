@@ -122,6 +122,55 @@ def _resolve_kaggle_csv_dir() -> Optional[Path]:
     return None
 
 
+def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
+    """
+    Convert Kaggle donors.csv to Parquet format for efficient loading.
+    This reduces memory usage significantly compared to loading CSV directly.
+    
+    Args:
+        csv_dir: Directory containing the Kaggle CSV files
+        
+    Returns:
+        Path to the created Parquet file, or None if conversion failed
+    """
+    parquet_path = csv_dir / "donors_cached.parquet"
+    
+    # If Parquet already exists, use it
+    if parquet_path.exists():
+        return parquet_path
+    
+    # Find donors.csv
+    donor_csv = None
+    for name in ["donors.csv", "donors_with_network_features.csv"]:
+        candidate = csv_dir / name
+        if candidate.exists():
+            donor_csv = candidate
+            break
+    
+    if not donor_csv or not donor_csv.exists():
+        return None
+    
+    try:
+        # Load CSV with optimized dtypes to reduce memory
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.info("🔄 Converting CSV to Parquet for faster loading...")
+        
+        # Read CSV in chunks to avoid OOM, then save as Parquet
+        df = pd.read_csv(donor_csv, low_memory=False)
+        
+        # Save as Parquet (much more memory-efficient)
+        df.to_parquet(parquet_path, engine='pyarrow', compression='snappy', index=False)
+        
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.success("✅ Parquet cache created successfully")
+        
+        return parquet_path
+    except Exception as e:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.warning(f"Failed to convert CSV to Parquet: {e}")
+        return None
+
+
 def _load_full_dataset_internal():
     """Internal function to load dataset (without caching decorator)."""
     root = settings.get_project_root()
@@ -136,10 +185,13 @@ def _load_full_dataset_internal():
     sqlite_paths = data_paths['sqlite_paths']
     csv_dir_candidates = data_paths['csv_dir_candidates']
 
+    # If Kaggle dataset was downloaded, convert CSV to Parquet for efficiency
     if kaggle_dir:
-        parquet_paths.insert(0, str(kaggle_dir / "donors_with_network_features.parquet"))
         resolved_csv_dir = _resolve_kaggle_csv_dir()
         if resolved_csv_dir:
+            cached_parquet = _convert_kaggle_csv_to_parquet(resolved_csv_dir)
+            if cached_parquet:
+                parquet_paths.insert(0, str(cached_parquet))
             csv_dir_candidates.insert(0, str(resolved_csv_dir))
     
     # Priority 1: Try Parquet file (fastest - use pyarrow engine)
