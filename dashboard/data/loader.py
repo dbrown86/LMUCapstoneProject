@@ -9,6 +9,7 @@ import os
 import glob
 import subprocess
 import shutil
+import json
 from pathlib import Path
 from typing import Optional
 
@@ -62,6 +63,38 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
             st.sidebar.error("Kaggle CLI is not installed. Add 'kaggle' to requirements.txt.")
         return None
 
+    # Check if Kaggle credentials are configured
+    kaggle_username = os.getenv("KAGGLE_USERNAME")
+    kaggle_key = os.getenv("KAGGLE_KEY")
+    
+    if not kaggle_username or not kaggle_key:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.error("⚠️ Kaggle credentials not found. Set KAGGLE_USERNAME and KAGGLE_KEY in Streamlit secrets.")
+        return None
+    
+    # Ensure Kaggle credentials directory exists
+    kaggle_creds_dir = Path.home() / ".kaggle"
+    kaggle_creds_dir.mkdir(exist_ok=True)
+    kaggle_creds_file = kaggle_creds_dir / "kaggle.json"
+    
+    # Write credentials if not already present or if they've changed
+    creds = {"username": kaggle_username, "key": kaggle_key}
+    needs_update = True
+    if kaggle_creds_file.exists():
+        try:
+            existing_creds = json.loads(kaggle_creds_file.read_text())
+            if existing_creds == creds:
+                needs_update = False
+        except (json.JSONDecodeError, IOError):
+            pass  # File exists but is invalid, will overwrite
+    
+    if needs_update:
+        kaggle_creds_file.write_text(json.dumps(creds))
+        try:
+            kaggle_creds_file.chmod(0o600)  # Restrict permissions (Unix only)
+        except (OSError, AttributeError):
+            pass  # chmod not available on Windows or file system doesn't support it
+    
     cmd = [
         kaggle_cli,
         "datasets",
@@ -74,12 +107,30 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     ]
 
     try:
-        subprocess.run(cmd, check=True, capture_output=True)
-        return KAGGLE_DOWNLOAD_DIR
-    except subprocess.CalledProcessError as err:
-        msg = err.stderr.decode("utf-8", errors="ignore") if err.stderr else str(err)
         if STREAMLIT_AVAILABLE:
-            st.sidebar.error(f"Failed to download Kaggle dataset: {msg}")
+            st.sidebar.info(f"📥 Downloading dataset from Kaggle: {KAGGLE_DATASET}")
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.success("✅ Kaggle dataset downloaded successfully")
+        return KAGGLE_DOWNLOAD_DIR
+    except subprocess.TimeoutExpired:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.error("⏱️ Kaggle download timed out after 10 minutes")
+        return None
+    except subprocess.CalledProcessError as err:
+        # Capture both stdout and stderr for better error messages
+        stdout_msg = err.stdout.decode("utf-8", errors="ignore") if err.stdout else ""
+        stderr_msg = err.stderr.decode("utf-8", errors="ignore") if err.stderr else ""
+        error_msg = f"{stderr_msg}\n{stdout_msg}".strip() if stderr_msg or stdout_msg else str(err)
+        
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.error(f"❌ Failed to download Kaggle dataset")
+            st.sidebar.error(f"Error details: {error_msg}")
+            # Provide helpful troubleshooting info
+            if "401" in error_msg or "Unauthorized" in error_msg:
+                st.sidebar.warning("💡 Check that KAGGLE_USERNAME and KAGGLE_KEY are correct in Streamlit secrets")
+            elif "404" in error_msg or "not found" in error_msg.lower():
+                st.sidebar.warning(f"💡 Verify dataset name is correct: {KAGGLE_DATASET}")
         return None
 
 
