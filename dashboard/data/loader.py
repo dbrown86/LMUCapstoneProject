@@ -857,6 +857,23 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     Returns:
         pd.DataFrame: Processed dataframe with standardized columns
     """
+    # STEP 1: Preprocess gift officer column FIRST (before any other processing)
+    # This ensures Primary_Manager is available for gift officer charts
+    if 'Primary_Manager' not in df.columns:
+        # Check for gift officer columns in order of preference
+        gift_officer_cols = ['Gift Officer', 'Gift_Officer', 'gift_officer', 'GiftOfficer']
+        for col in gift_officer_cols:
+            if col in df.columns:
+                df = df.rename(columns={col: 'Primary_Manager'})
+                break
+        else:
+            # If exact match not found, search case-insensitively
+            for col in df.columns:
+                col_lower = col.lower().strip()
+                if col_lower in ['gift officer', 'gift_officer', 'giftofficer']:
+                    df = df.rename(columns={col: 'Primary_Manager'})
+                    break
+    
     # Get column mapping from config
     column_mapping = settings.COLUMN_MAPPING.copy()
     
@@ -953,11 +970,16 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     column_mapping.update(extended_mapping)
     
     # Only rename columns that exist
+    # IMPORTANT: Exclude Primary_Manager from renaming if it already exists (preserve it)
+    if 'Primary_Manager' in df.columns:
+        # Remove any mappings that would overwrite Primary_Manager
+        column_mapping = {k: v for k, v in column_mapping.items() if v != 'Primary_Manager' or k == 'Primary_Manager'}
+    
     existing_renames = {k: v for k, v in column_mapping.items() if k in df.columns}
     df = df.rename(columns=existing_renames)
     
-    # POST-RENAME CHECK: Ensure Primary_Manager exists after all mappings
-    # If it still doesn't exist, try to find and map any gift officer column
+    # POST-RENAME CHECK: Ensure Primary_Manager still exists after all mappings
+    # This is a safety check - it should already exist from the preprocessing step
     if 'Primary_Manager' not in df.columns:
         # Try to find any column that might be a gift officer column
         # Check all columns for gift officer related terms
