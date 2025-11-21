@@ -34,6 +34,9 @@ KAGGLE_KNOWN_CSVS = {"donors.csv", "contacts.csv", "events.csv", "family.csv", "
 KAGGLE_CACHED_PARQUET = KAGGLE_DOWNLOAD_DIR / "donors_cached.parquet"
 KAGGLE_CACHED_SQLITE = KAGGLE_DOWNLOAD_DIR / "donors_cached.db"
 
+# Control verbose output (set STREAMLIT_VERBOSE_LOADING=true to show loading messages)
+VERBOSE_LOADING = os.getenv("STREAMLIT_VERBOSE_LOADING", "false").lower() == "true"
+
 
 def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     """
@@ -113,10 +116,10 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     ]
 
     try:
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info(f"📥 Downloading dataset from Kaggle: {KAGGLE_DATASET}")
         result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600, env=env)
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.success("✅ Kaggle dataset downloaded successfully")
         return KAGGLE_DOWNLOAD_DIR
     except subprocess.TimeoutExpired:
@@ -316,7 +319,7 @@ def _convert_kaggle_csv_to_optimized_parquet(csv_dir: Path) -> Optional[Path]:
         return None
     
     try:
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info("🔄 Converting CSV to optimized Parquet (loading essential columns only)...")
         
         # Get essential columns
@@ -336,7 +339,7 @@ def _convert_kaggle_csv_to_optimized_parquet(csv_dir: Path) -> Optional[Path]:
         )]
         selected_cols = list(set(available_cols + feature_cols))
         
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info(f"   Loading {len(selected_cols)} columns (out of {len(sample_chunk.columns)} total)")
         
         # Read full CSV in chunks with selected columns
@@ -344,7 +347,7 @@ def _convert_kaggle_csv_to_optimized_parquet(csv_dir: Path) -> Optional[Path]:
             chunks.append(chunk)
             total_rows += len(chunk)
             
-            if STREAMLIT_AVAILABLE and total_rows % 100000 == 0:
+            if STREAMLIT_AVAILABLE and VERBOSE_LOADING and total_rows % 100000 == 0:
                 st.sidebar.info(f"   Processed {total_rows:,} rows...")
         
         # Combine chunks
@@ -356,7 +359,7 @@ def _convert_kaggle_csv_to_optimized_parquet(csv_dir: Path) -> Optional[Path]:
         df = pd.concat(chunks, ignore_index=True)
         
         # Optimize data types
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info("   Optimizing data types...")
         df = _optimize_dtypes(df)
         
@@ -364,14 +367,14 @@ def _convert_kaggle_csv_to_optimized_parquet(csv_dir: Path) -> Optional[Path]:
         parquet_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Save as Parquet with compression
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info("   Saving optimized Parquet...")
         df.to_parquet(parquet_path, engine='pyarrow', compression='snappy', index=False)
         
         # Calculate memory savings
         memory_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
         
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.success(f"✅ Optimized Parquet created ({len(df):,} rows, {len(df.columns)} cols, ~{memory_mb:.0f}MB in memory)")
         
         return parquet_path
@@ -414,7 +417,7 @@ def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
     
     try:
         # Load CSV with optimized dtypes to reduce memory
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info("🔄 Converting CSV to Parquet (sampling rows and columns for memory efficiency)...")
         
         # Get max rows from environment (default 100K to prevent OOM)
@@ -511,7 +514,7 @@ def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
         # Save as Parquet (much more memory-efficient)
         df.to_parquet(parquet_path, engine='pyarrow', compression='snappy', index=False)
         
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.success(f"✅ Parquet cache created ({len(df):,} rows, {len(df.columns)} columns)")
         
         return parquet_path
@@ -534,7 +537,7 @@ def _load_csv_with_essential_columns(csv_path: Path, chunk_size: int = 50000) ->
         DataFrame with essential columns only, or None if loading fails
     """
     try:
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info(f"📂 Loading {csv_path.name} with essential columns only...")
         
         essential_cols = _get_essential_columns()
@@ -553,7 +556,7 @@ def _load_csv_with_essential_columns(csv_path: Path, chunk_size: int = 50000) ->
                 st.sidebar.warning(f"No essential columns found in {csv_path.name}")
             return None
         
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info(f"   Loading {len(selected_cols)} columns (out of {len(sample.columns)} total)")
         
         # Read CSV in chunks with selected columns
@@ -564,7 +567,7 @@ def _load_csv_with_essential_columns(csv_path: Path, chunk_size: int = 50000) ->
             chunks.append(chunk)
             total_rows += len(chunk)
             
-            if STREAMLIT_AVAILABLE and total_rows % 100000 == 0:
+            if STREAMLIT_AVAILABLE and VERBOSE_LOADING and total_rows % 100000 == 0:
                 st.sidebar.info(f"   Loaded {total_rows:,} rows...")
         
         if not chunks:
@@ -574,13 +577,13 @@ def _load_csv_with_essential_columns(csv_path: Path, chunk_size: int = 50000) ->
         df = pd.concat(chunks, ignore_index=True)
         
         # Optimize data types
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info("   Optimizing data types...")
         df = _optimize_dtypes(df)
         
         memory_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
         
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.success(f"✅ Loaded {len(df):,} rows, {len(df.columns)} cols (~{memory_mb:.0f}MB)")
         
         return df
@@ -601,7 +604,7 @@ def _load_full_dataset_internal():
     try:
         kaggle_dir = _download_kaggle_dataset_if_needed()
     except Exception as e:
-        if STREAMLIT_AVAILABLE:
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             st.sidebar.info(f"⚠️ Kaggle download skipped: {e}. Trying other data sources...")
 
     # Get paths from config
@@ -625,7 +628,7 @@ def _load_full_dataset_internal():
                         if cached_parquet:
                             parquet_paths.insert(0, str(cached_parquet))
                     except Exception as e:
-                        if STREAMLIT_AVAILABLE:
+                        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
                             st.sidebar.info(f"⚠️ Parquet conversion skipped: {e}. Trying direct CSV load...")
                         # Add CSV directory as fallback
                         csv_dir_candidates.insert(0, str(resolved_csv_dir))
@@ -636,8 +639,8 @@ def _load_full_dataset_internal():
     for path in parquet_paths:
         if os.path.exists(path):
             try:
-                if STREAMLIT_AVAILABLE:
-                    st.sidebar.info(f"📦 Loading optimized Parquet: {Path(path).name}")
+                    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                        st.sidebar.info(f"📦 Loading optimized Parquet: {Path(path).name}")
                 df = pd.read_parquet(path, engine='pyarrow')
                 return process_dataframe(df)
             except Exception as e:
@@ -692,7 +695,7 @@ def _load_full_dataset_internal():
         try:
             for p in glob.glob(pattern, recursive=True):
                 try:
-                    if STREAMLIT_AVAILABLE:
+                    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
                         st.sidebar.info(f"📦 Trying Parquet: {Path(p).name}")
                     df = pd.read_parquet(p, engine='pyarrow')
                     # Select only essential columns if dataset is large
@@ -724,8 +727,8 @@ def _load_full_dataset_internal():
                 try:
                     csv_path = Path(p)
                     if csv_path.exists() and csv_path.stat().st_size > 0:
-                        if STREAMLIT_AVAILABLE:
-                            st.sidebar.info(f"📂 Trying CSV: {csv_path.name}")
+                    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                        st.sidebar.info(f"📂 Trying CSV: {csv_path.name}")
                         df = _load_csv_with_essential_columns(csv_path)
                         if df is not None:
                             return process_dataframe(df)
