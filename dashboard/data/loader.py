@@ -28,7 +28,31 @@ except ImportError:
             return lambda *args, **kwargs: None
     st = MockStreamlit()
 
-KAGGLE_DATASET = os.getenv("KAGGLE_DATASET")
+# Helper function to get secrets from either Streamlit secrets or environment variables
+def _get_secret(key: str, default: str = None) -> Optional[str]:
+    """Get a secret from Streamlit secrets (preferred) or environment variables (fallback)."""
+    if STREAMLIT_AVAILABLE:
+        try:
+            # Try Streamlit secrets first (for Streamlit Cloud)
+            # Access st.secrets safely - it may not be available at module import time
+            if hasattr(st, 'secrets'):
+                try:
+                    secrets_dict = st.secrets
+                    if isinstance(secrets_dict, dict) and key in secrets_dict:
+                        return str(secrets_dict[key])
+                    # Also try nested access (st.secrets.KAGGLE_USERNAME)
+                    if hasattr(secrets_dict, key):
+                        return str(getattr(secrets_dict, key))
+                except (AttributeError, KeyError, TypeError):
+                    pass  # If secrets access fails, fall back to env vars
+        except Exception:
+            pass  # If anything fails, fall back to env vars
+    
+    # Fall back to environment variables (for local development)
+    return os.getenv(key, default)
+
+# Initialize at module level, but will be re-evaluated in functions if needed
+KAGGLE_DATASET = os.getenv("KAGGLE_DATASET")  # Will be overridden in function if st.secrets available
 KAGGLE_DOWNLOAD_DIR = Path(os.getenv("KAGGLE_DOWNLOAD_DIR", "/tmp/kaggle_data")).resolve()
 KAGGLE_KNOWN_CSVS = {"donors.csv", "contacts.csv", "events.csv", "family.csv", "giving.csv", "relationships.csv"}
 KAGGLE_CACHED_PARQUET = KAGGLE_DOWNLOAD_DIR / "donors_cached.parquet"
@@ -46,7 +70,9 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     Returns:
         Optional[Path]: Directory containing the extracted CSV/Parquet files, or None.
     """
-    if not KAGGLE_DATASET:
+    # Get secrets at function call time (when st.secrets is definitely available)
+    kaggle_dataset = _get_secret("KAGGLE_DATASET")
+    if not kaggle_dataset:
         return None
 
     try:
@@ -67,8 +93,9 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
         return None
 
     # Check if Kaggle credentials are configured
-    kaggle_username = os.getenv("KAGGLE_USERNAME")
-    kaggle_key = os.getenv("KAGGLE_KEY")
+    # Use _get_secret to check both Streamlit secrets and environment variables
+    kaggle_username = _get_secret("KAGGLE_USERNAME")
+    kaggle_key = _get_secret("KAGGLE_KEY")
     
     if not kaggle_username or not kaggle_key:
         if STREAMLIT_AVAILABLE:
@@ -104,12 +131,13 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     if "KAGGLE_USER_AGENT" not in env:
         env["KAGGLE_USER_AGENT"] = "streamlit-dashboard/1.0"
     
+    # Build command with dataset name from secrets
     cmd = [
         kaggle_cli,
         "datasets",
         "download",
         "-d",
-        KAGGLE_DATASET,
+        kaggle_dataset,
         "-p",
         str(KAGGLE_DOWNLOAD_DIR),
         "--unzip",
@@ -118,7 +146,7 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     try:
         if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
             try:
-                st.sidebar.info(f"📥 Downloading dataset from Kaggle: {KAGGLE_DATASET}")
+                st.sidebar.info(f"📥 Downloading dataset from Kaggle: {kaggle_dataset}")
             except Exception:
                 pass  # Even sidebar messages can fail
         try:
@@ -130,16 +158,59 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
                     pass
             return KAGGLE_DOWNLOAD_DIR
         except subprocess.TimeoutExpired:
-            # Silently fail - don't log to avoid any issues
+            if STREAMLIT_AVAILABLE:
+                try:
+                    st.sidebar.warning("⏱️ Kaggle download timed out. Trying other data sources...")
+                except Exception:
+                    pass
             return None
-        except subprocess.CalledProcessError:
-            # Silently fail - Kaggle download is optional
-            # Don't try to access err.stdout or err.stderr to avoid decode errors
-            # Just return None to allow fallback to other data sources
+        except subprocess.CalledProcessError as err:
+            # Safely extract error message for diagnostics
+            error_msg = "Unknown error"
+            try:
+                # Handle both string and bytes for stdout/stderr
+                stdout_str = ""
+                stderr_str = ""
+                if hasattr(err, 'stdout') and err.stdout:
+                    if isinstance(err.stdout, bytes):
+                        stdout_str = err.stdout.decode("utf-8", errors="ignore")
+                    else:
+                        stdout_str = str(err.stdout)
+                if hasattr(err, 'stderr') and err.stderr:
+                    if isinstance(err.stderr, bytes):
+                        stderr_str = err.stderr.decode("utf-8", errors="ignore")
+                    else:
+                        stderr_str = str(err.stderr)
+                
+                # Combine error messages
+                if stderr_str:
+                    error_msg = stderr_str.strip()
+                elif stdout_str:
+                    error_msg = stdout_str.strip()
+                else:
+                    error_msg = f"Exit code {err.returncode}"
+            except Exception:
+                # If anything fails, just use a generic message
+                try:
+                    error_msg = f"Exit code {err.returncode}" if hasattr(err, 'returncode') else "Unknown error"
+                except Exception:
+                    error_msg = "Unknown error"
+            
+            # Log the error for diagnostics (but don't crash)
+            if STREAMLIT_AVAILABLE:
+                try:
+                    st.sidebar.warning(f"⚠️ Kaggle download failed: {error_msg[:200]}. Trying other data sources...")
+                except Exception:
+                    pass
             return None
-        except Exception:
+        except Exception as e:
             # Catch any other exceptions (including AttributeError, OSError, etc.)
-            # Silently fail - Kaggle download is optional
+            error_msg = str(e) if e else "Unknown error"
+            if STREAMLIT_AVAILABLE:
+                try:
+                    st.sidebar.warning(f"⚠️ Kaggle download error: {error_msg[:200]}. Trying other data sources...")
+                except Exception:
+                    pass
             return None
     except Exception:
         # Outer catch-all - ensure nothing escapes
