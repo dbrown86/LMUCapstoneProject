@@ -518,10 +518,10 @@ def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
             # Other useful features
             'years_active', 'Years_Active',
             'consecutive_years', 'Consecutive_Years',
-            # Capacity and gift officer (for take_action page)
-            'Rating', 'rating', 'capacity', 'Capacity',
-            'Gift Officer', 'gift_officer', 'Gift_Officer',
-        ]
+               # Capacity and gift officer (for take_action page and dashboard)
+               'Rating', 'rating', 'capacity', 'Capacity',
+               'Gift Officer', 'gift_officer', 'Gift_Officer', 'Primary_Manager',
+           ]
         
         # Read CSV in chunks to sample rows efficiently
         chunk_size = 50000
@@ -908,11 +908,31 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         'Full_Name': 'donor_name',
         'full_name': 'donor_name',
         'Name': 'donor_name',
-        'name': 'donor_name'
+        'name': 'donor_name',
+        # Gift Officer / Primary Manager mapping
+        'Gift Officer': 'Primary_Manager',
+        'Gift_Officer': 'Primary_Manager',
+        'gift_officer': 'Primary_Manager',
+        'Primary_Manager': 'Primary_Manager'  # Keep if already exists
     }
     
     # Merge mappings
     column_mapping.update(extended_mapping)
+    
+    # Handle Primary_Manager mapping specially - if Primary_Manager already exists, don't map Gift Officer columns
+    # Otherwise, map Gift Officer columns to Primary_Manager
+    if 'Primary_Manager' not in df.columns:
+        # Map gift officer columns to Primary_Manager
+        gift_officer_cols = ['Gift Officer', 'Gift_Officer', 'gift_officer']
+        for col in gift_officer_cols:
+            if col in df.columns:
+                column_mapping[col] = 'Primary_Manager'
+                break  # Only map the first one found
+    else:
+        # Primary_Manager already exists, remove gift officer mappings to avoid conflicts
+        column_mapping.pop('Gift Officer', None)
+        column_mapping.pop('Gift_Officer', None)
+        column_mapping.pop('gift_officer', None)
     
     # Only rename columns that exist
     existing_renames = {k: v for k, v in column_mapping.items() if k in df.columns}
