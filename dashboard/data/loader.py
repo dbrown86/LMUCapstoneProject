@@ -128,8 +128,14 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     # Set User-Agent for Kaggle API (required by some versions)
     # Pass environment variables explicitly to subprocess
     env = os.environ.copy()
-    if "KAGGLE_USER_AGENT" not in env:
+    # Ensure KAGGLE_USER_AGENT is always a valid string (never None or empty)
+    kaggle_user_agent = env.get("KAGGLE_USER_AGENT")
+    if not kaggle_user_agent or kaggle_user_agent == "None" or not isinstance(kaggle_user_agent, str):
         env["KAGGLE_USER_AGENT"] = "streamlit-dashboard/1.0"
+    else:
+        env["KAGGLE_USER_AGENT"] = str(kaggle_user_agent).strip()
+        if not env["KAGGLE_USER_AGENT"]:  # If it's an empty string after stripping
+            env["KAGGLE_USER_AGENT"] = "streamlit-dashboard/1.0"
     
     # Build command with dataset name from secrets
     cmd = [
