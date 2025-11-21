@@ -859,6 +859,8 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     """
     # STEP 1: Preprocess gift officer column FIRST (before any other processing)
     # This ensures Primary_Manager is available for gift officer charts
+    # NOTE: Primary_Manager column exists in the dataset (99.6% null, but column exists)
+    # If it's not in df.columns, try to find and map gift officer columns
     if 'Primary_Manager' not in df.columns:
         # Check for gift officer columns - try exact matches first
         gift_officer_exact = ['Gift Officer', 'Gift_Officer', 'gift_officer', 'GiftOfficer', 'Primary_Manager', 'Primary Manager']
@@ -979,13 +981,20 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     column_mapping.update(extended_mapping)
     
     # Only rename columns that exist
-    # IMPORTANT: Exclude Primary_Manager from renaming if it already exists (preserve it)
+    # IMPORTANT: Preserve Primary_Manager if it exists - don't rename it
+    # Store it temporarily if it exists
+    primary_manager_col = None
     if 'Primary_Manager' in df.columns:
+        primary_manager_col = df['Primary_Manager'].copy()
         # Remove any mappings that would overwrite Primary_Manager
         column_mapping = {k: v for k, v in column_mapping.items() if v != 'Primary_Manager' or k == 'Primary_Manager'}
     
     existing_renames = {k: v for k, v in column_mapping.items() if k in df.columns}
     df = df.rename(columns=existing_renames)
+    
+    # Restore Primary_Manager if it was in the original dataframe
+    if primary_manager_col is not None and 'Primary_Manager' not in df.columns:
+        df['Primary_Manager'] = primary_manager_col
     
     # POST-RENAME CHECK: Ensure Primary_Manager still exists after all mappings
     # This is a safety check - it should already exist from the preprocessing step
