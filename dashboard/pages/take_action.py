@@ -133,111 +133,111 @@ def render(df, prob_threshold: float = 0.5):
         quick_wins = pd.DataFrame()
         cultivation = pd.DataFrame()
         re_engagement = pd.DataFrame()
+    
+    # Display Quick Wins (outside the if/else block so it always runs)
+    st.markdown("### 🎯 Quick Wins - High Probability Recent Donors")
+    st.info("**Priority:** Contact immediately. These donors have high likelihood (>70%) and gave recently (0-6 months).")
+    
+    if len(quick_wins) > 0:
+        # Use Last_Gift for median gift calculation (more accurate than avg_gift)
+        last_gift_col = None
+        for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
+            if col in quick_wins.columns:
+                last_gift_col = col
+                break
         
-        # Display Quick Wins
-        st.markdown("### 🎯 Quick Wins - High Probability Recent Donors")
-        st.info("**Priority:** Contact immediately. These donors have high likelihood (>70%) and gave recently (0-6 months).")
-        
-        if len(quick_wins) > 0:
-            # Use Last_Gift for median gift calculation (more accurate than avg_gift)
-            last_gift_col = None
-            for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
-                if col in quick_wins.columns:
-                    last_gift_col = col
-                    break
-            
-            # Calculate median gift - use Last_Gift if available, otherwise fallback to avg_gift
-            if last_gift_col:
-                quick_wins['median_gift'] = pd.to_numeric(quick_wins[last_gift_col], errors='coerce').fillna(0).clip(lower=0)
-            elif 'avg_gift' in quick_wins.columns:
-                quick_wins['median_gift'] = pd.to_numeric(quick_wins['avg_gift'], errors='coerce').fillna(0).clip(lower=0)
-            else:
-                quick_wins['median_gift'] = 0
-            
-            # Get name columns if available
-            name_cols = []
-            for col in ['First_Name', 'first_name', 'First Name']:
-                if col in quick_wins.columns:
-                    name_cols.append(col)
-                    break
-            for col in ['Last_Name', 'last_name', 'Last Name']:
-                if col in quick_wins.columns:
-                    name_cols.append(col)
-                    break
-            
-            # Select columns, excluding any other lifetime value columns to avoid duplicates
-            # Note: capacity and gift officer columns are excluded from display
-            base_cols_qw = ['donor_id'] + name_cols + [c for c in [prob_col, 'median_gift', 'total_giving', 'segment'] if c in quick_wins.columns]
-            # Remove any duplicate lifetime-related columns (keep only total_giving)
-            lifetime_cols_to_exclude = ['Lifetime_Value', 'Lifetime_Giving', 'lifetime_giving', 'Lifetime Value', 'LifetimeGiving']
-            base_cols_qw = [c for c in base_cols_qw if c not in lifetime_cols_to_exclude]
-            # Also exclude any columns ending with _2, _3, etc. that might be duplicates
-            base_cols_qw = [c for c in base_cols_qw if not c.endswith('_2') and not c.endswith('_3')]
-            
-            quick_wins_display = quick_wins[base_cols_qw].copy()
-            
-            # Format values BEFORE renaming to avoid duplicate column issues
-            # Format probability
-            if prob_col in quick_wins_display.columns:
-                prob_data = quick_wins_display[prob_col]
-                if isinstance(prob_data, pd.DataFrame):
-                    prob_data = prob_data.iloc[:, 0]
-                quick_wins_display[prob_col] = prob_data.apply(lambda x: f"{x:.1%}")
-            # Format median gift - handle DataFrame case
-            if 'median_gift' in quick_wins_display.columns:
-                median_gift_data = quick_wins_display['median_gift']
-                if isinstance(median_gift_data, pd.DataFrame):
-                    median_gift_data = median_gift_data.iloc[:, 0]
-                median_gift_series = pd.to_numeric(median_gift_data, errors='coerce').fillna(0)
-                quick_wins_display['median_gift'] = median_gift_series.apply(lambda x: f"${x:,.2f}" if x > 0 else "$0.00")
-            # Format total giving - handle DataFrame case
-            if 'total_giving' in quick_wins_display.columns:
-                total_giving_data = quick_wins_display['total_giving']
-                if isinstance(total_giving_data, pd.DataFrame):
-                    total_giving_data = total_giving_data.iloc[:, 0]
-                total_giving_series = pd.to_numeric(total_giving_data, errors='coerce').fillna(0)
-                quick_wins_display['total_giving'] = total_giving_series.apply(lambda x: f"${x:,.2f}" if x > 0 else "$0.00")
-            # Calculate Recommended Ask (use numeric value from original dataframe)
-            quick_wins_display['Recommended Ask'] = quick_wins['median_gift'].apply(lambda x: f"${float(x)*1.2:,.0f}" if pd.notna(x) and float(x) > 0 else "N/A")
-            
-            # Now rename columns
-            rename_dict = {
-                prob_col: 'Probability',
-                'median_gift': 'Median Gift',
-                'total_giving': 'Lifetime Value',
-                'First_Name': 'First Name',
-                'first_name': 'First Name',
-                'First Name': 'First Name',
-                'Last_Name': 'Last Name',
-                'last_name': 'Last Name',
-                'Last Name': 'Last Name'
-            }
-            quick_wins_display = quick_wins_display.rename(columns=rename_dict)
-            quick_wins_display['Contact Priority'] = 'HIGH'
-            quick_wins_display = _ensure_unique_columns(quick_wins_display)
-            # Remove any columns ending with _2, _3, etc. (duplicate columns created by _ensure_unique_columns)
-            # Also remove any columns with "Lifetime" and "_2" in the name
-            quick_wins_display = quick_wins_display[[c for c in quick_wins_display.columns 
-                                                     if not c.endswith('_2') and not c.endswith('_3') 
-                                                     and not ('Lifetime' in c and '_2' in c)
-                                                     and not ('lifetime' in c.lower() and '_2' in c)]]
-            st.dataframe(quick_wins_display.head(20), width='stretch', hide_index=True)
-            
-            # Download CSV with all displayed columns
-            csv_quick = quick_wins_display.to_csv(index=False)
-            st.download_button(
-                "📥 Download Quick Wins List (50 donors)",
-                csv_quick,
-                file_name=f"quick_wins_{datetime.now().strftime('%Y%m%d')}.csv",
-                mime="text/csv"
-            )
+        # Calculate median gift - use Last_Gift if available, otherwise fallback to avg_gift
+        if last_gift_col:
+            quick_wins['median_gift'] = pd.to_numeric(quick_wins[last_gift_col], errors='coerce').fillna(0).clip(lower=0)
+        elif 'avg_gift' in quick_wins.columns:
+            quick_wins['median_gift'] = pd.to_numeric(quick_wins['avg_gift'], errors='coerce').fillna(0).clip(lower=0)
         else:
-            st.warning("No quick wins identified. Consider lowering the probability threshold.")
+            quick_wins['median_gift'] = 0
         
-        st.markdown("---")
+        # Get name columns if available
+        name_cols = []
+        for col in ['First_Name', 'first_name', 'First Name']:
+            if col in quick_wins.columns:
+                name_cols.append(col)
+                break
+        for col in ['Last_Name', 'last_name', 'Last Name']:
+            if col in quick_wins.columns:
+                name_cols.append(col)
+                break
         
-        # Display Cultivation Targets
-        st.markdown("### 🌱 Cultivation Targets - Medium Probability, High Value")
+        # Select columns, excluding any other lifetime value columns to avoid duplicates
+        # Note: capacity and gift officer columns are excluded from display
+        base_cols_qw = ['donor_id'] + name_cols + [c for c in [prob_col, 'median_gift', 'total_giving', 'segment'] if c in quick_wins.columns]
+        # Remove any duplicate lifetime-related columns (keep only total_giving)
+        lifetime_cols_to_exclude = ['Lifetime_Value', 'Lifetime_Giving', 'lifetime_giving', 'Lifetime Value', 'LifetimeGiving']
+        base_cols_qw = [c for c in base_cols_qw if c not in lifetime_cols_to_exclude]
+        # Also exclude any columns ending with _2, _3, etc. that might be duplicates
+        base_cols_qw = [c for c in base_cols_qw if not c.endswith('_2') and not c.endswith('_3')]
+        
+        quick_wins_display = quick_wins[base_cols_qw].copy()
+        
+        # Format values BEFORE renaming to avoid duplicate column issues
+        # Format probability
+        if prob_col in quick_wins_display.columns:
+            prob_data = quick_wins_display[prob_col]
+            if isinstance(prob_data, pd.DataFrame):
+                prob_data = prob_data.iloc[:, 0]
+            quick_wins_display[prob_col] = prob_data.apply(lambda x: f"{x:.1%}")
+        # Format median gift - handle DataFrame case
+        if 'median_gift' in quick_wins_display.columns:
+            median_gift_data = quick_wins_display['median_gift']
+            if isinstance(median_gift_data, pd.DataFrame):
+                median_gift_data = median_gift_data.iloc[:, 0]
+            median_gift_series = pd.to_numeric(median_gift_data, errors='coerce').fillna(0)
+            quick_wins_display['median_gift'] = median_gift_series.apply(lambda x: f"${x:,.2f}" if x > 0 else "$0.00")
+        # Format total giving - handle DataFrame case
+        if 'total_giving' in quick_wins_display.columns:
+            total_giving_data = quick_wins_display['total_giving']
+            if isinstance(total_giving_data, pd.DataFrame):
+                total_giving_data = total_giving_data.iloc[:, 0]
+            total_giving_series = pd.to_numeric(total_giving_data, errors='coerce').fillna(0)
+            quick_wins_display['total_giving'] = total_giving_series.apply(lambda x: f"${x:,.2f}" if x > 0 else "$0.00")
+        # Calculate Recommended Ask (use numeric value from original dataframe)
+        quick_wins_display['Recommended Ask'] = quick_wins['median_gift'].apply(lambda x: f"${float(x)*1.2:,.0f}" if pd.notna(x) and float(x) > 0 else "N/A")
+        
+        # Now rename columns
+        rename_dict = {
+            prob_col: 'Probability',
+            'median_gift': 'Median Gift',
+            'total_giving': 'Lifetime Value',
+            'First_Name': 'First Name',
+            'first_name': 'First Name',
+            'First Name': 'First Name',
+            'Last_Name': 'Last Name',
+            'last_name': 'Last Name',
+            'Last Name': 'Last Name'
+        }
+        quick_wins_display = quick_wins_display.rename(columns=rename_dict)
+        quick_wins_display['Contact Priority'] = 'HIGH'
+        quick_wins_display = _ensure_unique_columns(quick_wins_display)
+        # Remove any columns ending with _2, _3, etc. (duplicate columns created by _ensure_unique_columns)
+        # Also remove any columns with "Lifetime" and "_2" in the name
+        quick_wins_display = quick_wins_display[[c for c in quick_wins_display.columns 
+                                                 if not c.endswith('_2') and not c.endswith('_3') 
+                                                 and not ('Lifetime' in c and '_2' in c)
+                                                 and not ('lifetime' in c.lower() and '_2' in c)]]
+        st.dataframe(quick_wins_display.head(20), width='stretch', hide_index=True)
+        
+        # Download CSV with all displayed columns
+        csv_quick = quick_wins_display.to_csv(index=False)
+        st.download_button(
+            "📥 Download Quick Wins List (50 donors)",
+            csv_quick,
+            file_name=f"quick_wins_{datetime.now().strftime('%Y%m%d')}.csv",
+            mime="text/csv"
+        )
+    else:
+        st.warning("No quick wins identified. Consider lowering the probability threshold.")
+    
+    st.markdown("---")
+    
+    # Display Cultivation Targets
+    st.markdown("### 🌱 Cultivation Targets - Medium Probability, High Value")
         st.info("**Priority:** Build relationships. These donors have moderate likelihood (40-70%) but high lifetime value.")
         
         if len(cultivation) > 0:
@@ -333,14 +333,16 @@ def render(df, prob_threshold: float = 0.5):
                 file_name=f"cultivation_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
-        
-        st.markdown("---")
-        
-        # Display Re-engagement
-        st.markdown("### 🔄 Re-engagement Opportunities - Lapsed but High Predicted Probability")
-        st.info("**Priority:** Reconnect strategically. These donors haven't given recently but show strong likelihood (>60%).")
-        
-        if len(re_engagement) > 0:
+    else:
+        st.warning("No cultivation targets identified.")
+    
+    st.markdown("---")
+    
+    # Display Re-engagement
+    st.markdown("### 🔄 Re-engagement Opportunities - Lapsed but High Predicted Probability")
+    st.info("**Priority:** Reconnect strategically. These donors haven't given recently but show strong likelihood (>60%).")
+    
+    if len(re_engagement) > 0:
             # Use Last_Gift for median gift calculation (more accurate than avg_gift)
             last_gift_col = None
             for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
@@ -433,6 +435,8 @@ def render(df, prob_threshold: float = 0.5):
                 file_name=f"re_engagement_{datetime.now().strftime('%Y%m%d')}.csv",
                 mime="text/csv"
             )
+    else:
+        st.warning("No re-engagement opportunities identified.")
     
     # Action Plan Summary
     st.markdown("### 📋 Recommended Action Plan")
