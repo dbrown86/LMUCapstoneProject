@@ -22,6 +22,7 @@ except ImportError:
 try:
     from dashboard.models.metrics import get_model_metrics, try_load_saved_metrics
     from dashboard.pages.utils import filter_dataframe, get_value_counts, get_segment_performance, get_segment_stats
+    from dashboard.data.query_loader import QueryBasedLoader
 except ImportError:
     # Fallbacks for testing
     def get_model_metrics(df):
@@ -36,6 +37,7 @@ except ImportError:
         return pd.DataFrame()
     def get_segment_stats(df, use_cache=True):
         return pd.DataFrame()
+    QueryBasedLoader = None
 
 # Import chart wrapper (separate try/except to ensure it's always available)
 try:
@@ -53,7 +55,7 @@ except ImportError:
         return None
 
 
-def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segments: List[str], prob_threshold: float):
+def render(df, regions: List[str], donor_types: List[str], segments: List[str], prob_threshold: float):
     """
     Render the executive dashboard page.
     
@@ -82,52 +84,98 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
         prob_col_exec = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df_filtered.columns else 'predicted_prob'
         outcome_col_exec = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df_filtered.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df_filtered.columns else 'actual_gave')
 
+        # Check if we're using QueryBasedLoader
+        is_query_loader = QueryBasedLoader is not None and isinstance(df_filtered, QueryBasedLoader)
+        
         if prob_col_exec in df_filtered.columns and 'avg_gift' in df_filtered.columns and 'total_giving' in df_filtered.columns:
             metrics_summary = get_model_metrics(df_filtered)
-            # Use the same threshold as the Revenue Potential metric for consistency
-            # CRITICAL: Use Will_Give_Again_Probability directly if available (not predicted_prob which may be from Legacy_Intent)
-            high_prob_donors = df_filtered[df_filtered[prob_col_exec] >= prob_threshold]
-            # Use actual conversion rate if available, otherwise estimate
-            # CRITICAL: Use Gave_Again_In_2025 directly if available (fallback to 2025)
-            # CRITICAL: avg_gift_amount column appears corrupted (mean $0.03), use Last_Gift instead
-            if outcome_col_exec in df_filtered.columns and len(high_prob_donors) > 0:
-                actual_conversion = high_prob_donors[outcome_col_exec].mean()
-                # Use Last_Gift (last gift amount) for revenue calculation instead of avg_gift_amount
-                # Last_Gift represents what they actually gave most recently, better for "untapped potential"
-                last_gift_col = None
-                for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
-                    if col in high_prob_donors.columns:
-                        last_gift_col = col
-                        break
-
-                if last_gift_col:
-                    gift_amounts = pd.to_numeric(high_prob_donors[last_gift_col], errors='coerce').fillna(0).clip(lower=0)
-                    # Use median instead of mean for robustness (outliers in Last_Gift can skew mean to $28K+)
-                    # Median Last_Gift for high prob donors is more representative of typical gift amounts
-                    avg_gift_mean = gift_amounts.median() if len(gift_amounts) > 0 else gift_amounts.mean() if len(gift_amounts) > 0 else 0
+            
+            # Handle QueryBasedLoader vs DataFrame differently
+            if is_query_loader:
+                # Use SQL queries for aggregations
+                # Get high probability donors count (not used but kept for consistency)
+                high_prob_count = df_filtered.get_aggregate_value(
+                    column=None,
+                    aggregation='COUNT',
+                    where=f'"{prob_col_exec}" >= {prob_threshold}'
+                )
+                
+                # Get high probability donors data for calculations
+                high_prob_donors = df_filtered.get_filtered_dataframe(
+                    where=f'"{prob_col_exec}" >= {prob_threshold}'
+                )
+                
+                if len(high_prob_donors) > 0:
+                    # Calculate conversion rate
+                    if outcome_col_exec in high_prob_donors.columns:
+                        actual_conversion = pd.to_numeric(high_prob_donors[outcome_col_exec], errors='coerce').mean()
+                    else:
+                        actual_conversion = 0.85  # Fallback
+                    
+                    # Get gift amounts
+                    last_gift_col = None
+                    for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
+                        if col in high_prob_donors.columns:
+                            last_gift_col = col
+                            break
+                    
+                    if last_gift_col:
+                        gift_amounts = pd.to_numeric(high_prob_donors[last_gift_col], errors='coerce').fillna(0).clip(lower=0)
+                        avg_gift_mean = gift_amounts.median() if len(gift_amounts) > 0 else 0
+                    else:
+                        avg_gift_values = pd.to_numeric(high_prob_donors['avg_gift'], errors='coerce').fillna(0).clip(lower=0)
+                        avg_gift_mean = avg_gift_values.mean() if len(avg_gift_values) > 0 else 0
+                    
+                    estimated_revenue = avg_gift_mean * len(high_prob_donors) * actual_conversion
                 else:
-                    # Fallback to avg_gift if Last_Gift not available
-                    avg_gift_values = pd.to_numeric(high_prob_donors['avg_gift'], errors='coerce').fillna(0).clip(lower=0)
-                    avg_gift_mean = avg_gift_values.mean() if len(avg_gift_values) > 0 else 0
-
-                estimated_revenue = avg_gift_mean * len(high_prob_donors) * actual_conversion
+                    estimated_revenue = 0
+                
+                # Get high confidence count
+                high_confidence_count = int(df_filtered.get_aggregate_value(
+                    column=None,
+                    aggregation='COUNT',
+                    where=f'"{prob_col_exec}" >= 0.7'
+                ))
             else:
-                # Fallback estimate if actual outcome data not available
-                last_gift_col = None
-                for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
-                    if col in high_prob_donors.columns:
-                        last_gift_col = col
-                        break
+                # Traditional DataFrame operations
+                high_prob_donors = df_filtered[df_filtered[prob_col_exec] >= prob_threshold]
+                
+                if outcome_col_exec in df_filtered.columns and len(high_prob_donors) > 0:
+                    actual_conversion = high_prob_donors[outcome_col_exec].mean()
+                    last_gift_col = None
+                    for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
+                        if col in high_prob_donors.columns:
+                            last_gift_col = col
+                            break
 
-                if last_gift_col:
-                    gift_amounts = pd.to_numeric(high_prob_donors[last_gift_col], errors='coerce').fillna(0).clip(lower=0) if len(high_prob_donors) > 0 else pd.Series([0])
-                    # Use median for robustness against outliers
-                    avg_gift_mean = gift_amounts.median() if len(gift_amounts) > 0 else gift_amounts.mean() if len(gift_amounts) > 0 else 0
+                    if last_gift_col:
+                        gift_amounts = pd.to_numeric(high_prob_donors[last_gift_col], errors='coerce').fillna(0).clip(lower=0)
+                        avg_gift_mean = gift_amounts.median() if len(gift_amounts) > 0 else gift_amounts.mean() if len(gift_amounts) > 0 else 0
+                    else:
+                        avg_gift_values = pd.to_numeric(high_prob_donors['avg_gift'], errors='coerce').fillna(0).clip(lower=0)
+                        avg_gift_mean = avg_gift_values.mean() if len(avg_gift_values) > 0 else 0
+
+                    estimated_revenue = avg_gift_mean * len(high_prob_donors) * actual_conversion
                 else:
-                    avg_gift_values = pd.to_numeric(high_prob_donors['avg_gift'], errors='coerce').fillna(0).clip(lower=0) if len(high_prob_donors) > 0 else pd.Series([0])
-                    avg_gift_mean = avg_gift_values.mean() if len(avg_gift_values) > 0 else 0
+                    last_gift_col = None
+                    for col in ['Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount']:
+                        if col in high_prob_donors.columns:
+                            last_gift_col = col
+                            break
 
-                estimated_revenue = avg_gift_mean * len(high_prob_donors) * 0.85 if len(high_prob_donors) > 0 else 0
+                    if last_gift_col:
+                        gift_amounts = pd.to_numeric(high_prob_donors[last_gift_col], errors='coerce').fillna(0).clip(lower=0) if len(high_prob_donors) > 0 else pd.Series([0])
+                        avg_gift_mean = gift_amounts.median() if len(gift_amounts) > 0 else gift_amounts.mean() if len(gift_amounts) > 0 else 0
+                    else:
+                        avg_gift_values = pd.to_numeric(high_prob_donors['avg_gift'], errors='coerce').fillna(0).clip(lower=0) if len(high_prob_donors) > 0 else pd.Series([0])
+                        avg_gift_mean = avg_gift_values.mean() if len(avg_gift_values) > 0 else 0
+
+                    estimated_revenue = avg_gift_mean * len(high_prob_donors) * 0.85 if len(high_prob_donors) > 0 else 0
+
+                if prob_col_exec in df_filtered.columns:
+                    high_confidence_count = (pd.to_numeric(df_filtered[prob_col_exec], errors='coerce') >= 0.7).sum()
+                else:
+                    high_confidence_count = 0
 
             if estimated_revenue >= 1_000_000_000:
                 revenue_display = f"${estimated_revenue/1_000_000_000:.1f}B"
@@ -135,13 +183,6 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                 revenue_display = f"${estimated_revenue/1_000_000:,.0f}M"
             else:
                 revenue_display = f"${estimated_revenue:,.0f}"
-
-            # Calculate high confidence prospects count for the Key Insight section
-            # Note: prob_col_exec is already defined above (line 83)
-            if prob_col_exec in df_filtered.columns:
-                high_confidence_count = (pd.to_numeric(df_filtered[prob_col_exec], errors='coerce') >= 0.7).sum()
-            else:
-                high_confidence_count = 0
             
             st.markdown(f"""
             <div style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 25px; border-radius: 10px; margin-bottom: 30px;">
@@ -289,8 +330,8 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
             <div class="metric-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">AUC Score</div>
                 <div class="metric-value" style="color: white;">{auc_display}</div>
-                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">Predicting "will give again in 2025"</div>
-                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">compared to {baseline_auc_display} Baseline AUC</div>
+                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 9px; line-height: 1.2;">Predicting "will give again in 2025"</div>
+                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 9px; line-height: 1.2;">compared to {baseline_auc_display} Baseline AUC</div>
             </div>
             """, unsafe_allow_html=True)
 
