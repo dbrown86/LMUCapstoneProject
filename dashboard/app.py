@@ -193,8 +193,84 @@ def main() -> None:
         page_config['menu_items'] = None  # Remove default menu items
         st.set_page_config(**page_config)
 
-        # Global styles
+        # Global styles - apply immediately to hide default sidebar
         st.markdown(get_css_styles(), unsafe_allow_html=True)
+        
+        # Immediately remove default sidebar content with inline script
+        # This removes elements from DOM entirely, not just hides them
+        st.markdown("""
+        <script>
+        (function() {
+            // Aggressively remove default sidebar navigation from DOM
+            function removeDefaultSidebar() {
+                const selectors = [
+                    '[data-testid="stSidebarNav"]',
+                    'section[data-testid="stSidebarNav"]',
+                    'nav[data-testid="stSidebarNav"]',
+                    '.css-1544g2n'
+                ];
+                
+                // Remove all matching elements
+                selectors.forEach(selector => {
+                    document.querySelectorAll(selector).forEach(el => {
+                        // Hide first (instant)
+                        el.style.cssText = 'display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important; position: absolute !important; left: -9999px !important; width: 0 !important;';
+                        // Then remove from DOM
+                        try { el.remove(); } catch(e) {}
+                        // Also try removing parent if it only contains navigation
+                        if (el.parentNode) {
+                            const parent = el.parentNode;
+                            if (parent.getAttribute('data-testid') === 'stSidebarNav' || 
+                                parent.querySelector('[data-testid="stSidebarNav"]')) {
+                                try { parent.remove(); } catch(e) {}
+                            }
+                        }
+                    });
+                });
+                
+                // Check sidebar for navigation containers and remove them
+                const sidebar = document.querySelector('[data-testid="stSidebar"]');
+                if (sidebar) {
+                    const children = Array.from(sidebar.children);
+                    children.forEach(child => {
+                        if (child.getAttribute('data-testid') === 'stSidebarNav' || 
+                            child.querySelector('[data-testid="stSidebarNav"]')) {
+                            child.style.cssText = 'display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important; position: absolute !important; left: -9999px !important; width: 0 !important;';
+                            try { child.remove(); } catch(e) {}
+                        }
+                    });
+                }
+            }
+            
+            // Run immediately and very frequently
+            removeDefaultSidebar();
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', removeDefaultSidebar);
+            }
+            
+            // Very aggressive - check every 5ms and remove immediately
+            setInterval(removeDefaultSidebar, 5);
+            
+            // MutationObserver to catch and remove new elements immediately
+            const observer = new MutationObserver(function(mutations) {
+                removeDefaultSidebar();
+            });
+            
+            if (document.body) {
+                observer.observe(document.body, {childList: true, subtree: true, attributes: false});
+            } else {
+                document.addEventListener('DOMContentLoaded', () => {
+                    observer.observe(document.body, {childList: true, subtree: true, attributes: false});
+                });
+            }
+            
+            // Multiple timeouts to catch elements at different render stages
+            [1, 5, 10, 20, 50, 100, 200, 500].forEach(ms => {
+                setTimeout(removeDefaultSidebar, ms);
+            });
+        })();
+        </script>
+        """, unsafe_allow_html=True)
 
         # Load dataset (cached inside loader) - show progress for first load
         with st.spinner("Loading dataset..."):

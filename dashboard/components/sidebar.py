@@ -69,6 +69,37 @@ def render_sidebar(df) -> Tuple[str, List[str], List[str], List[str], float]:
         # Return defaults if Streamlit not available (for testing)
         return "🏠 Executive Summary", [], [], [], 0.5
     
+    # CRITICAL: Remove default Streamlit sidebar navigation IMMEDIATELY
+    # This must run before any other sidebar content to prevent flash
+    st.sidebar.markdown("""
+    <style>
+    /* Hide default Streamlit page navigation immediately - highest priority */
+    [data-testid="stSidebarNav"] {display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important; position: absolute !important; left: -9999px !important; width: 0 !important;}
+    section[data-testid="stSidebarNav"] {display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important; position: absolute !important; left: -9999px !important; width: 0 !important;}
+    nav[data-testid="stSidebarNav"] {display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important; position: absolute !important; left: -9999px !important; width: 0 !important;}
+    .css-1544g2n {display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important; position: absolute !important; left: -9999px !important; width: 0 !important;}
+    </style>
+    <script>
+    (function() {
+        function removeNav() {
+            ['[data-testid="stSidebarNav"]', 'section[data-testid="stSidebarNav"]', 'nav[data-testid="stSidebarNav"]', '.css-1544g2n'].forEach(s => {
+                document.querySelectorAll(s).forEach(el => {
+                    el.style.cssText = 'display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important; position: absolute !important; left: -9999px !important; width: 0 !important;';
+                    try { el.remove(); } catch(e) {}
+                });
+            });
+        }
+        removeNav();
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', removeNav);
+        }
+        setInterval(removeNav, 5);
+        const obs = new MutationObserver(removeNav);
+        if (document.body) obs.observe(document.body, {childList: true, subtree: true});
+    })();
+    </script>
+    """, unsafe_allow_html=True)
+    
     # Load brand font and styles for University Advancement title
     st.sidebar.markdown("""
     <style>

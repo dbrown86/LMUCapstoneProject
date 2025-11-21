@@ -289,7 +289,8 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         y=[baseline_revenue, fusion_revenue],
                         marker_color=['#e74c3c', '#2ecc71'],
                         text=[f"${baseline_revenue:,.0f}", f"${fusion_revenue:,.0f}"],
-                        textposition='outside'
+                        textposition='outside',
+                        textfont=dict(weight='bold')
                     ))
                     # Adjust y-axis to leave room for labels above bars
                     max_revenue = max(baseline_revenue, fusion_revenue)
@@ -314,7 +315,8 @@ def render(df: pd.DataFrame, prob_threshold: float):
                         y=[baseline_roi, fusion_roi],
                         marker_color=['#e74c3c', '#2ecc71'],
                         text=[baseline_roi_text, fusion_roi_text],
-                        textposition='outside'
+                        textposition='outside',
+                        textfont=dict(weight='bold')
                     ))
                     # Adjust y-axis to leave room for labels above bars
                     max_roi = max(baseline_roi, fusion_roi)
@@ -333,7 +335,7 @@ def render(df: pd.DataFrame, prob_threshold: float):
                 st.markdown(f"""
                 <div style="background-color: #000000; padding: 15px; border-radius: 8px; margin-top: 20px; border-left: 4px solid #667eea;">
                     <p style="margin: 0; font-size: 14px; color: #ffffff;">
-                        <strong>📊 Chart Explanation:</strong> These charts compare the Baseline and Fusion model scenarios based on contacting 
+                        <strong>💡 How to read:</strong> These charts compare the Baseline and Fusion model scenarios based on contacting 
                         the top <strong>{contact_percentage}%</strong> of donors (as selected in the slider above). The revenue and ROI calculations 
                         reflect the expected outcomes when using the multi-modal fusion model versus random outreach for the same number of contacts.
                     </p>

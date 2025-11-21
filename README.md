@@ -1,148 +1,121 @@
-# LMU CS Capstone Project: Synthetic Donor Dataset with Dense Relationships
+# LMU CS Capstone Project: Synthetic Donor Dataset & Multimodal Fusion Model for Fundraising Analytics
 
 ## 🎯 Project Overview
 
-This project generates a comprehensive **500,000 donor synthetic dataset** with **1.8 million dense relationships** for advanced donor analytics and machine learning research. The dataset includes multiple relationship types, event attendance, giving history, and contact reports.
+Fundraising and philanthropy research suffers from a scarcity of **open-source datasets**—privacy concerns and donor confidentiality make real-world data almost impossible to share. This project addresses that gap by generating a **synthetic donor dataset** (500K records, 1.8M dense relationships) expressly designed for experimenting with **machine learning (ML)** and **deep learning (DL)** approaches in advancement analytics.
 
-## 📊 Dataset Summary
+The dataset includes contact reports, gift histories, event attendance, household linkages, and graph-based influence signals. On top of the data layer, we implement a **novel multimodal fusion model** that unifies tabular, sequential, network, and text-derived features through a deep learning pipeline (MLP + LSTM + attention + fusion layers). The result is an end-to-end DL pipeline for exploring how modern AI techniques can elevate prospect prioritization, revenue forecasting, and gift officer workflows.
 
-- **Total Donors**: 500,000
-- **Dense Relationships**: 1,805,144
-- **Giving History Records**: 3,836,541
-- **Event Attendance**: 156,065
-- **Contact Reports**: 329,299
-- **Family Relationships**: 91,592
+### Key Innovations
+- **Open source synthetic fundraising dataset** with rich, interleaved donor behaviors.
+- **Multimodal fusion architecture** combining tabular encoders, sequence models, graph/network embeddings, and text aggregates with cross-modal attention.
+- **Temporal validation** (1980–2025) to mimic real deployment scenarios for 2025 predictions.
+- **Streamlit dashboard** that surfaces KPIs, feature insights, and business impact for practitioner review.
 
-### Relationship Types:
-- **Professional**: 500,964 relationships
-- **Alumni**: 400,840 relationships  
-- **Geographic**: 300,170 relationships
-- **Giving**: 300,000 relationships
-- **Activity**: 200,000 relationships
-- **Family**: 93,170 relationships
-- **Social**: 10,000 relationships
+## 📊 Dataset Snapshot
+
+- **Total Donors**: 500,000  
+- **Dense Relationships**: 1,805,144  
+- **Giving History Records**: 3,836,541  
+- **Event Attendance**: 156,065  
+- **Contact Reports**: 329,299  
+- **Relationship Mix**: Professional (500K), Alumni (401K), Geographic (300K), Giving (300K), Activity (200K), Family (93K), Social (10K)
 
 ## 🗂️ Project Structure
 
 ```
 LMUCapstoneProject/
 ├── data/
-│   └── synthetic_donor_dataset_500k_dense/    # Main 500K dataset
-│       ├── donors.csv                         # Core donor data
-│       ├── dense_relationships.csv            # All relationship types
-│       ├── dense_relationships.parquet        # Optimized format
-│       ├── donor_database.db                  # SQLite database
-│       ├── family_relationships.csv           # Family connections
-│       ├── event_attendance.csv               # Event participation
-│       ├── giving_history.csv                 # Donation records
-│       ├── contact_reports.csv                # Contact interactions
-│       ├── enhanced_fields.csv                # ML features
-│       └── parts/                             # Checkpoint files
-├── scripts/
-│   └── generate_enhanced_500k_dataset_with_dense_relationships.py  # Main generator
-├── src/
-│   ├── data_generation/                       # Data generation modules
-│   ├── gnn_models/                           # Graph neural network models
-│   └── *.py                                  # Core ML pipeline modules
-├── dashboard/                                 # Streamlit web interface
-├── docs/                                     # Documentation and analysis
-├── examples/                                 # Usage examples
-├── models/                                   # Trained model checkpoints
-└── visualizations/                           # Generated plots and charts
+│   └── synthetic_donor_dataset_500k_dense/      # Core synthetic corpus
+│       ├── donors.csv / donor_database.db       # Tabular + SQL formats
+│       ├── dense_relationships.(csv|parquet)    # Network edges
+│       ├── giving_history.csv                   # Longitudinal gifts
+│       └── parts/                               # Generation checkpoints
+├── dashboard/                                   # Streamlit app + assets
+│   ├── app.py                                   # Main entry point
+│   ├── architecture_diagram.html                # Visual overview (used in README)
+│   └── pages/ / components/ / models/           # Modular UI + metrics
+├── docs/                                        # Deep dives + guides
+├── scripts/                                     # Dataset generation utilities
+├── src/                                         # ML/DL training pipelines
+├── models/                                      # Saved checkpoints
+└── visualizations/                              # Plots, analyses, figures
 ```
+
+## 🧠 Architecture Diagram
+
+The full multimodal training flow (data generation → feature engineering → fusion model → evaluation → dashboard deployment) is captured in `dashboard/architecture_diagram.html`. Open that file in a browser to view the interactive layered diagram referenced throughout the documentation.
+
+## 🖥️ Streamlit Dashboard (placeholder)
+
+> _Coming soon_: add deployment notes, screenshots, and/or a public link to the Streamlit Experience Hub. The dashboard already lives in `dashboard/app.py` and can be launched with `streamlit run dashboard/app.py`.
 
 ## 🚀 Quick Start
 
-### 1. Generate the Dataset
+### 1. Generate / refresh the dataset
 ```bash
 python scripts/generate_enhanced_500k_dataset_with_dense_relationships.py
 ```
 
-### 2. Use the SQL Database (Recommended)
+### 2. Explore via SQLite (recommended)
 ```python
-import sqlite3
-import pandas as pd
-
-# Connect to database
+import sqlite3, pandas as pd
 conn = sqlite3.connect('data/synthetic_donor_dataset_500k_dense/donor_database.db')
-
-# Query donors
 donors = pd.read_sql_query("SELECT * FROM donors LIMIT 10", conn)
-
-# Query relationships
 relationships = pd.read_sql_query("""
-    SELECT * FROM relationships 
-    WHERE Relationship_Category = 'Alumni' 
+    SELECT * FROM relationships
+    WHERE Relationship_Category = 'Alumni'
     LIMIT 10
 """, conn)
 ```
 
-### 3. Use CSV Files
+### 3. Work with CSV/Parquet extracts
 ```python
 import pandas as pd
-
-# Load main datasets
 donors = pd.read_csv('data/synthetic_donor_dataset_500k_dense/donors.csv')
 relationships = pd.read_csv('data/synthetic_donor_dataset_500k_dense/dense_relationships.csv')
 ```
 
-## 🔧 Technical Features
+### 4. Launch the dashboard
+```bash
+streamlit run dashboard/app.py
+```
 
-### Memory Optimization
-- **Incremental disk writing** prevents OOM errors
-- **Vectorized NumPy operations** for 10-100x speedup
-- **Chunked processing** with hard caps on relationship counts
-- **SQLite database** with 24 performance indexes
+## 🔧 Technical Highlights
 
-### Data Quality
-- **Referential integrity** across all tables
-- **Realistic relationship densities** (0.0014% graph density)
-- **Comprehensive validation** and QA checks
-- **Checkpoint system** for resumable generation
+**Memory + Performance**
+- Incremental disk writes and chunked processing prevent OOM on standard laptops.
+- Vectorized NumPy/Pandas flow yields 10–100× faster generation.
+- SQLite backend ships with 24 tuned indexes → complex network joins in ~3 seconds.
 
-### Performance
-- **Query speed**: Complex joins in ~3 seconds
-- **Database size**: 936 MB (compressed)
-- **Memory usage**: <2 GB during generation
-- **Generation time**: ~10-15 minutes
+**Data Fidelity**
+- Referential integrity enforced across donors, gifts, relationships, and events.
+- Graph density calibrated (≈0.0014%) to mirror enterprise advancement CRMs.
+- QA pipeline plus resumable checkpoints for long-running jobs.
 
-## 📈 Use Cases
+**Modeling Approach**
+- Feature store covers RFM, engagement streaks, network centrality, capacity indicators, and synthetic contact report stats.
+- Multimodal pipeline (`src/models/train_will_give_again.py`) fuses 60+ engineered features with sequential gift histories, network embeddings, and SVD-based text signals.
+- Training splits: **1980–2023** (train), **2024** (validation), **2025** (test target) with AdamW + BCE-with-logits + ReduceLROnPlateau + batch size 2048 + hidden dim 256.
 
-- **Donor Analytics**: Relationship network analysis
-- **Machine Learning**: Graph neural networks, recommendation systems
-- **Research**: Social network analysis, fundraising optimization
-- **Development**: Testing ML pipelines with realistic data
+## 📚 Documentation & Support
 
-## 🛠️ Requirements
+- `docs/TRAINING_PIPELINE_GUIDE.md` – Training + evaluation steps  
+- `docs/INTERPRETABILITY_GUIDE.md` – Explaining model decisions  
+- `docs/OPTIMIZATION_GUIDE.md` – Performance + scaling tips  
+- `examples/` – Quick notebooks and scripts to jump-start analysis
 
-- Python 3.8+
-- pandas, numpy, sqlite3
-- Optional: polars (for faster CSV processing)
-
-## 📚 Documentation
-
-- `docs/TRAINING_PIPELINE_GUIDE.md` - ML pipeline setup
-- `docs/INTERPRETABILITY_GUIDE.md` - Model interpretability
-- `docs/OPTIMIZATION_GUIDE.md` - Performance optimization
-- `examples/` - Usage examples and tutorials
-
-## 🎉 Success Metrics
-
-✅ **Dataset Generation**: 500K donors with 1.8M relationships  
-✅ **Memory Management**: No OOM errors with optimized processing  
-✅ **Data Quality**: All integrity checks passed  
-✅ **Performance**: Sub-3-second complex queries  
-✅ **Documentation**: Comprehensive guides and examples  
-
-## 📞 Support
-
-For questions or issues, refer to the documentation in the `docs/` folder or check the example scripts in `examples/`.
+For questions, explore the `docs/` folder or open an issue/PR with reproducible steps. This repository is intentionally open so other institutions can build upon the synthetic dataset and multimodal modeling blueprint.
 
 ---
 
-**Generated**: 2025-01-22  
-**Version**: 1.0  
-**Status**: Production Ready ✅
+## 👤 Credits
+
+**Created by**  
+Danielle Brown  
+Loyola Marymount University  
+M.S. in Computer Science Senior Capstone Project  
+2025
 
 
 

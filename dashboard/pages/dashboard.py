@@ -153,15 +153,20 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                     </div>
                     <div>
                         <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">Business Impact</div>
-                        <div style="font-size: 18px; font-weight: bold;">{revenue_display} in Untapped Donor Potential</div>
+                        <div style="font-size: 18px; font-weight: bold; margin-top: -2px;">{revenue_display} in Untapped Donor Potential</div>
                     </div>
                     <div>
                         <div style="font-size: 14px; opacity: 0.9; margin-bottom: 5px;">Recommended Action</div>
-                        <div style="font-size: 18px; font-weight: bold;">Prioritize Outreach to Top Prospects</div>
+                        <div style="font-size: 18px; font-weight: bold;">Prioritize Outreach to High Confidence Prospects</div>
                     </div>
                 </div>
             </div>
             """, unsafe_allow_html=True)
+
+        # Divider line matching sidebar background color
+        st.markdown("""
+        <div style="height: 4px; background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); margin: 20px 0;"></div>
+        """, unsafe_allow_html=True)
 
         # Hero metrics
         col1, col2, col3, col4 = st.columns(4)
@@ -221,8 +226,37 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
             except Exception:
                 pass  # Silently fail - will show N/A
         
+        # Calculate baseline AUC if not available
+        if metrics.get('baseline_auc') is None:
+            try:
+                from sklearn.metrics import roc_auc_score
+                outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else 'actual_gave')
+                
+                if outcome_col in df.columns and 'days_since_last' in df.columns:
+                    y_true = pd.to_numeric(df[outcome_col], errors='coerce')
+                    days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
+                    base_mask = y_true.notna() & days_series.notna()
+                    
+                    if base_mask.sum() > 0:
+                        y_true_base = y_true[base_mask].astype(int).values
+                        days_valid = days_series[base_mask].astype(float).values
+                        
+                        unique_classes_base = np.unique(y_true_base)
+                        if len(unique_classes_base) >= 2:
+                            # Calculate baseline predictions: more recent = higher probability
+                            max_days = np.nanpercentile(days_valid, 95) if days_valid.size > 0 else np.nanmax(days_valid)
+                            if np.isfinite(max_days) and max_days > 0:
+                                baseline_pred = 1 - (np.clip(days_valid, 0, max_days) / max_days)
+                                metrics['baseline_auc'] = roc_auc_score(y_true_base, baseline_pred)
+            except Exception:
+                pass  # Silently fail - will use default
+        
+        # Use default baseline AUC if still None (50.29% = 0.5029)
+        if metrics.get('baseline_auc') is None:
+            metrics['baseline_auc'] = 0.5029
+        
         auc_display = f"{metrics['auc']:.2%}" if metrics.get('auc') is not None else "N/A"
-        baseline_auc_display = f"{metrics['baseline_auc']:.2%}" if metrics.get('baseline_auc') is not None else "N/A"
+        baseline_auc_display = f"{metrics['baseline_auc']:.2%}" if metrics.get('baseline_auc') is not None else "50.29%"
         improvement = ((metrics['auc'] - metrics['baseline_auc']) / metrics['baseline_auc'] * 100) if metrics.get('baseline_auc') and metrics.get('baseline_auc') > 0 and metrics.get('auc') is not None else 0
         
         # Calculate lift (improvement ratio) for the "4-5x" display
@@ -256,7 +290,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">AUC Score</div>
                 <div class="metric-value" style="color: white;">{auc_display}</div>
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">Predicting "will give again in 2025"</div>
-                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">compared to 50.29% Baseline AUC</div>
+                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">compared to {baseline_auc_display} Baseline AUC</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -331,6 +365,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
             <div class="metric-card" style="background: linear-gradient(135deg, #4facfe 0%, #00f2fe 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">Revenue Potential</div>
                 <div class="metric-value" style="color: white;">{rev_display}</div>
+                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px; opacity: 0;">&nbsp;</div>
             </div>
             """, unsafe_allow_html=True)
 
@@ -339,13 +374,14 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
             <div class="metric-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">Improvement</div>
                 <div class="metric-value" style="color: white;">{improvement_display}</div>
-                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">vs Baseline (2025)</div>
+                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">vs Baseline</div>
             </div>
             """, unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-
-        st.markdown("<br>", unsafe_allow_html=True)
+        # Divider line matching sidebar background color
+        st.markdown("""
+        <div style="height: 4px; background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); margin: 20px 0;"></div>
+        """, unsafe_allow_html=True)
 
         # Charts Section
         col1, col2 = st.columns(2)
@@ -415,7 +451,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                             paper_bgcolor='rgba(0,0,0,0)',
                             margin=dict(t=20, b=40, l=140, r=80),
                             yaxis=dict(
-                                title='',
+                                title=dict(text='Donor Segment', font=dict(size=12, color='white')),
                                 autorange='reversed',
                                 categoryorder='array',
                                 categoryarray=category_order,
@@ -433,7 +469,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                             font=dict(family="Arial, sans-serif", color='white')
                         )
                         plotly_chart_silent(fig_segment, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
-                        st.caption("💡 **How to read**: Donors are grouped into engaged (green) to at-risk (orange/red). Focus retention efforts on the yellow/orange bands before they turn red. Note: This chart excludes non-donors.")
+                        st.markdown("**💡 How to read**: Donors are grouped into engaged (green) to at-risk (orange/red). Focus retention efforts on the yellow/orange bands before they turn red. Note: This chart excludes non-donors.", unsafe_allow_html=True)
                     else:
                         st.info("No donor segment data available (excluding Prospects/New).")
                 else:
@@ -445,6 +481,9 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
         with col2:
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
             st.markdown("#### 🎯 Donors Predicted to Give Again")
+            # Add vertical spacing to align caption with Donor Base Breakdown chart
+            # Donor Base Breakdown chart height is 380px, this chart is 250px, so add ~130px spacing
+            st.markdown("<div style='height: 130px;'></div>", unsafe_allow_html=True)
             # CRITICAL: Use 2025 prediction column - prioritize Will_Give_Again_Probability
             prob_col_tiers = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df_work.columns else 'predicted_prob'
             if prob_col_tiers in df_work.columns:
@@ -457,7 +496,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                     summary.columns = ['Tier', 'Count']
                     fig_tiers = px.bar(summary, x='Tier', y='Count', color='Tier',
                                        color_discrete_map={'Low': '#f44336', 'Medium': '#ffc107', 'High': '#4caf50'})
-                    fig_tiers.update_traces(texttemplate='%{y:,}', textposition='outside')
+                    fig_tiers.update_traces(texttemplate='%{y:,}', textposition='outside', textfont=dict(weight='bold'))
                     max_tier_count = summary['Count'].max()
                     tier_padding = max(1, max_tier_count * 0.25) if pd.notna(max_tier_count) else 1
                     fig_tiers.update_layout(
@@ -473,8 +512,8 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
             else:
                 st.info("Prediction probabilities not available.")
             st.markdown('</div>', unsafe_allow_html=True)
-            st.caption(
-                "💡 **How to read**: Donors are grouped into Low/Medium/High based on predicted probability. Focus on the High-tier donors first.",
+            st.markdown(
+                "<div style='margin-top: -16px;'>💡 How to read: Donors are grouped into Low/Medium/High based on predicted probability. Focus on the High-tier donors first.</div>",
                 unsafe_allow_html=True
             )
 
@@ -620,6 +659,10 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
         # Gift Officer Assignment Section
         st.markdown("---")
         st.markdown("### 👥 Gift Officer Assignments & Unassigned Prospects")
+        # Divider line matching sidebar background color
+        st.markdown("""
+        <div style="height: 4px; background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); margin: 15px 0;"></div>
+        """, unsafe_allow_html=True)
         
         # Check if Primary_Manager column exists
         if 'Primary_Manager' in df_work.columns:
@@ -752,7 +795,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                         font=dict(family="Arial, sans-serif")
                     )
                     plotly_chart_silent(fig_officer, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
-                    st.caption("💡 **How to read**: Quality Score combines median Will Give Again probability (60% weight) and recent giving activity (40% weight). Scores ≥70 = High quality (green), 50-69 = Medium (orange), <50 = Low (red). Officers are ranked from highest to lowest quality.")
+                    st.markdown("**💡 How to read**: Quality Score combines median Will Give Again probability (60% weight) and recent giving activity (40% weight). Scores ≥70 = High quality (green), 50-69 = Medium (orange), <50 = Low (red). Officers are ranked from highest to lowest quality.", unsafe_allow_html=True)
                 else:
                     missing = []
                     if not prob_col:
@@ -961,7 +1004,7 @@ def render(df: pd.DataFrame, regions: List[str], donor_types: List[str], segment
                             render_quadrant_card(row2_col1, 'monitor')  # Bottom Left
                             render_quadrant_card(row2_col2, 'longshot')  # Bottom Right
                             
-                            st.caption(f"💡 **How to read**: Prospects segmented by probability to give again (≥70% = High) and recency (≤365 days = Recent). Focus on **🔥 HOT PROSPECTS** first - they have both high likelihood AND recent engagement. Total top-quartile unassigned: {len(valid_data):,} (lifetime giving ≥${giving_threshold:,.0f}).")
+                            st.markdown(f"**💡 How to read**: Prospects segmented by probability to give again (≥70% = High) and recency (≤365 days = Recent). Focus on **🔥 HOT PROSPECTS** first - they have both high likelihood AND recent engagement. Total top-quartile unassigned: {len(valid_data):,} (lifetime giving ≥${giving_threshold:,.0f}).", unsafe_allow_html=True)
                         else:
                             st.info("No valid data available (missing last gift date or probability information).")
                     else:
