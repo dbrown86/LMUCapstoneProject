@@ -126,9 +126,21 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
             pass  # chmod not available on Windows or file system doesn't support it
     
     # Pass environment variables to subprocess
-    # Remove KAGGLE_USER_AGENT entirely - it's not required and causes issues
-    env = os.environ.copy()
-    env.pop("KAGGLE_USER_AGENT", None)  # Remove if it exists to avoid None errors
+    # CRITICAL: Completely remove KAGGLE_USER_AGENT - it's causing None errors
+    # The error "Header part (None)" happens when KAGGLE_USER_AGENT is None or "None"
+    
+    # Remove from os.environ first (before copying)
+    if "KAGGLE_USER_AGENT" in os.environ:
+        del os.environ["KAGGLE_USER_AGENT"]
+    
+    # Create clean environment dict - explicitly exclude KAGGLE_USER_AGENT
+    env = {}
+    # Copy all environment variables EXCEPT KAGGLE_USER_AGENT
+    for key, value in os.environ.items():
+        if key != "KAGGLE_USER_AGENT":
+            # Only add valid string values (filter out None)
+            if value is not None and isinstance(value, str):
+                env[key] = value
     
     # Build command with dataset name from secrets
     cmd = [
