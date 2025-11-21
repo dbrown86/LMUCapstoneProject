@@ -614,12 +614,19 @@ def _load_full_dataset_internal():
     env_dir = Path(data_dir_env).resolve() if data_dir_env else None
     
     # Try Kaggle download (non-blocking - if it fails, continue with other sources)
+    # Wrap in try/except to ensure it never crashes the app
     kaggle_dir = None
     try:
         kaggle_dir = _download_kaggle_dataset_if_needed()
     except Exception as e:
+        # Silently continue - Kaggle download is optional
+        # Only log if verbose mode is enabled, and wrap in try/except to be extra safe
         if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-            st.sidebar.info(f"⚠️ Kaggle download skipped: {e}. Trying other data sources...")
+            try:
+                error_str = str(e)
+                st.sidebar.info(f"⚠️ Kaggle download skipped: {error_str}. Trying other data sources...")
+            except Exception:
+                pass  # Even error logging can fail, so be extra safe
 
     # Get paths from config
     data_paths = settings.get_data_paths()
