@@ -96,6 +96,9 @@ os.environ['STREAMLIT_LOGGER_LEVEL'] = 'error'
 with warnings.catch_warnings():
     warnings.simplefilter("ignore")
     import streamlit as st
+    import streamlit.components.v1 as components
+
+from streamlit.errors import StreamlitAPIException
 
 # ==========================================
 # STEP 6: Apply Streamlit-specific warning suppression (Solution 2)
@@ -148,6 +151,16 @@ if str(project_root) not in sys.path:
 
 # Config, styles, data, sidebar - import immediately (lightweight)
 from dashboard.config import settings
+
+# Apply page configuration immediately so default UI never flashes
+_page_config = settings.PAGE_CONFIG.copy()
+_page_config['menu_items'] = None
+_page_config.setdefault('initial_sidebar_state', 'expanded')
+try:
+    st.set_page_config(**_page_config)
+except StreamlitAPIException:
+    pass
+
 from dashboard.components.styles import get_css_styles
 from dashboard.components.sidebar import render_sidebar
 from dashboard.data.loader import load_full_dataset
@@ -180,6 +193,96 @@ def _lazy_import_page(page_name):
     return None
 
 
+def _inject_launch_screen() -> None:
+    """Display a branded launch overlay to mask default sidebar + show loading."""
+    components.html(
+        """
+        <style>
+            html[data-ua-loading="true"] [data-testid="stSidebarNav"],
+            html[data-ua-loading="true"] [data-testid="stSidebar"] section:nth-of-type(1) {
+                display: none !important;
+            }
+            #ua-launch-overlay {
+                position: fixed;
+                inset: 0;
+                background: radial-gradient(circle at top, rgba(30,60,114,0.92), rgba(0,0,0,0.96));
+                display: flex;
+                align-items: center;
+                justify-content: center;
+                flex-direction: column;
+                color: #e3e9ff;
+                font-family: 'Segoe UI', 'Inter', sans-serif;
+                z-index: 9999;
+                transition: opacity 0.4s ease;
+            }
+            #ua-launch-overlay.fade-out {
+                opacity: 0;
+                pointer-events: none;
+            }
+            .ua-launch-card {
+                text-align: center;
+                padding: 32px 48px;
+                border-radius: 18px;
+                background: rgba(7,12,24,0.65);
+                box-shadow: 0 20px 50px rgba(5,10,25,0.55);
+                border: 1px solid rgba(255,255,255,0.08);
+            }
+            .ua-spinner {
+                width: 48px;
+                height: 48px;
+                border-radius: 50%;
+                border: 3px solid rgba(255,255,255,0.2);
+                border-top-color: #4f8cff;
+                animation: ua-spin 0.9s linear infinite;
+                margin: 0 auto 18px;
+            }
+            @keyframes ua-spin {
+                to { transform: rotate(360deg); }
+            }
+            .ua-launch-title {
+                font-size: 20px;
+                font-weight: 600;
+                letter-spacing: 0.05em;
+                margin-bottom: 6px;
+            }
+            .ua-launch-subtitle {
+                font-size: 14px;
+                opacity: 0.8;
+                letter-spacing: 0.2em;
+                text-transform: uppercase;
+            }
+        </style>
+        <div id="ua-launch-overlay">
+            <div class="ua-launch-card">
+                <div class="ua-spinner"></div>
+                <div class="ua-launch-title">Loading dashboard</div>
+            </div>
+        </div>
+        <script>
+            document.documentElement.setAttribute('data-ua-loading', 'true');
+        </script>
+        """,
+        height=0,
+    )
+
+
+def _dismiss_launch_screen() -> None:
+    """Remove the branded launch overlay once layout + sidebar are ready."""
+    components.html(
+        """
+        <script>
+            document.documentElement.setAttribute('data-ua-loading', 'false');
+            const overlay = document.getElementById('ua-launch-overlay');
+            if (overlay) {
+                overlay.classList.add('fade-out');
+                setTimeout(() => overlay.remove(), 450);
+            }
+        </script>
+        """,
+        height=0,
+    )
+
+
 def main() -> None:
     # ==========================================
     # Wrap entire main function in warning suppression context
@@ -188,17 +291,16 @@ def main() -> None:
         warnings.simplefilter("ignore")
         warnings.simplefilter("ignore", category=DeprecationWarning)
         
-        # Page config - disable automatic page discovery
-        page_config = settings.PAGE_CONFIG.copy()
-        page_config['menu_items'] = None  # Remove default menu items
-        st.set_page_config(**page_config)
-
-        # Global styles - apply immediately to hide default sidebar
-        st.markdown(get_css_styles(), unsafe_allow_html=True)
+        overlay_active = False
+        try:
+            # Global styles - apply immediately to hide default sidebar
+            st.markdown(get_css_styles(), unsafe_allow_html=True)
+            _inject_launch_screen()
+            overlay_active = True
         
-        # Immediately remove default sidebar content with inline script
-        # This removes elements from DOM entirely, not just hides them
-        st.markdown("""
+            # Immediately remove default sidebar content with inline script
+            # This removes elements from DOM entirely, not just hides them
+            st.markdown("""
         <script>
         (function() {
             // Aggressively remove default sidebar navigation from DOM
@@ -248,8 +350,9 @@ def main() -> None:
                 document.addEventListener('DOMContentLoaded', removeDefaultSidebar);
             }
             
-            // Very aggressive - check every 5ms and remove immediately
-            setInterval(removeDefaultSidebar, 5);
+            // Check frequently during initial render, then stop
+            const removalInterval = setInterval(removeDefaultSidebar, 60);
+            setTimeout(() => { clearInterval(removalInterval); }, 2000);
             
             // MutationObserver to catch and remove new elements immediately
             const observer = new MutationObserver(function(mutations) {
@@ -272,43 +375,46 @@ def main() -> None:
         </script>
         """, unsafe_allow_html=True)
 
-        # Load dataset (cached inside loader) - show progress for first load
-        with st.spinner("Loading dataset..."):
-            df = load_full_dataset(use_cache=True)
+            # Load dataset (cached inside loader) - show progress for first load
+            with st.spinner("Loading dataset..."):
+                df = load_full_dataset(use_cache=True)
 
-        # Sidebar: navigation + filters
-        page, regions, donor_types, segments, prob_threshold = render_sidebar(df)
+            # Sidebar: navigation + filters
+            page, regions, donor_types, segments, prob_threshold = render_sidebar(df)
 
-        # Route to pages with lazy loading (all within warning suppression context)
-        # Only import the specific page module when needed
-        try:
-            if page == "🏠 Executive Summary":
-                render_func = _lazy_import_page("dashboard")
-                render_func(df, regions, donor_types, segments, prob_threshold)
-            elif page == "🔬 Model Comparison":
-                render_func = _lazy_import_page("model_comparison")
-                render_func(df)
-            elif page == "💰 Business Impact":
-                render_func = _lazy_import_page("business_impact")
-                render_func(df, prob_threshold)
-            elif page == "🔬 Features":
-                render_func = _lazy_import_page("features")
-                render_func(df)
-            elif page == "📈 Performance":
-                render_func = _lazy_import_page("performance")
-                render_func(df)
-            elif page == "⚡ Take Action":
-                render_func = _lazy_import_page("take_action")
-                render_func(df, prob_threshold)
-            elif page == "📚 About":
-                render_func = _lazy_import_page("about")
-                render_func(df)
-            else:
-                st.error(f"Unknown page: {page}")
-        except Exception as e:
-            st.error(f"Error loading page: {e}")
-            import traceback
-            st.code(traceback.format_exc())
+            # Route to pages with lazy loading (all within warning suppression context)
+            # Only import the specific page module when needed
+            try:
+                if page == "🏠 Executive Summary":
+                    render_func = _lazy_import_page("dashboard")
+                    render_func(df, regions, donor_types, segments, prob_threshold)
+                elif page == "🔬 Model Comparison":
+                    render_func = _lazy_import_page("model_comparison")
+                    render_func(df)
+                elif page == "💰 Business Impact":
+                    render_func = _lazy_import_page("business_impact")
+                    render_func(df, prob_threshold)
+                elif page == "🔬 Features":
+                    render_func = _lazy_import_page("features")
+                    render_func(df)
+                elif page == "📈 Performance":
+                    render_func = _lazy_import_page("performance")
+                    render_func(df)
+                elif page == "⚡ Take Action":
+                    render_func = _lazy_import_page("take_action")
+                    render_func(df, prob_threshold)
+                elif page == "📚 About":
+                    render_func = _lazy_import_page("about")
+                    render_func(df)
+                else:
+                    st.error(f"Unknown page: {page}")
+            except Exception as e:
+                st.error(f"Error loading page: {e}")
+                import traceback
+                st.code(traceback.format_exc())
+        finally:
+            if overlay_active:
+                _dismiss_launch_screen()
 
 
 if __name__ == "__main__":

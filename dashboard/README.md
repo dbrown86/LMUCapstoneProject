@@ -1,4 +1,4 @@
-# DonorAI Analytics Dashboard
+# Fictitious U Philanthropy Dashboard
 
 ## 🚀 Quick Start
 

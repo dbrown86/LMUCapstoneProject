@@ -390,12 +390,24 @@ def render(df: pd.DataFrame = None):
     # Credits/Attribution section at the bottom
     st.markdown("---")
     st.markdown("""
-    <div style="text-align: center; padding: 30px 0; color: #666; font-size: 14px;">
-        <p style="margin: 10px 0;"><strong>Created by</strong></p>
-        <p style="margin: 10px 0;">Danielle Brown</p>
-        <p style="margin: 10px 0;">Loyola Marymount University</p>
-        <p style="margin: 10px 0;">M.S. in Computer Science Senior Capstone Project</p>
-        <p style="margin: 10px 0;">2025</p>
+    <div style="
+        max-width: 460px;
+        margin: 40px auto;
+        padding: 30px;
+        border-radius: 16px;
+        background: linear-gradient(135deg, #1e3c72 0%, #2a5298 45%, #394b65 100%);
+        color: #f0f4ff;
+        text-align: center;
+        box-shadow: 0 12px 28px rgba(18, 24, 47, 0.35);
+        border: 1px solid rgba(255, 255, 255, 0.08);
+    ">
+        <p style="font-size: 13px; letter-spacing: 2px; text-transform: uppercase; margin: 0 0 12px; color: #b8c7ff;">
+            CREATED BY
+        </p>
+        <p style="font-size: 24px; font-weight: 600; margin: 0 0 6px;">Danielle Brown</p>
+        <p style="font-size: 15px; margin: 0 0 2px;">Loyola Marymount University</p>
+        <p style="font-size: 15px; margin: 0 0 18px;">M.S. in Computer Science Senior Capstone Project</p>
+        <p style="font-size: 13px; letter-spacing: 3px; margin: 0; color: #d7deff;">December 2025</p>
     </div>
     """, unsafe_allow_html=True)
 
