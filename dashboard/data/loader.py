@@ -126,9 +126,7 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
             pass  # chmod not available on Windows or file system doesn't support it
     
     # Pass environment variables to subprocess
-    # CRITICAL: Completely remove KAGGLE_USER_AGENT - it's causing None errors
-    # The error "Header part (None)" happens when KAGGLE_USER_AGENT is None or "None"
-    
+    # CRITICAL: Remove KAGGLE_USER_AGENT completely - it's causing None errors
     # Remove from os.environ first (before copying)
     if "KAGGLE_USER_AGENT" in os.environ:
         del os.environ["KAGGLE_USER_AGENT"]
@@ -962,23 +960,17 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # If it still doesn't exist, try to find and map any gift officer column
     if 'Primary_Manager' not in df.columns:
         # Try to find any column that might be a gift officer column
-        gift_officer_patterns = [
-            'Gift Officer', 'Gift_Officer', 'gift_officer', 'gift officer',
-            'Primary_Manager', 'Primary Manager', 'primary_manager',
-            'Manager', 'manager', 'Officer', 'officer'
-        ]
+        # Check all columns for gift officer related terms
         found_col = None
-        for pattern in gift_officer_patterns:
-            # Check exact match first
-            if pattern in df.columns:
-                found_col = pattern
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            # Check for specific gift officer patterns
+            if col_lower in ['gift officer', 'gift_officer', 'gift officer', 'primary_manager', 'primary manager']:
+                found_col = col
                 break
-            # Check case-insensitive match
-            for col in df.columns:
-                if col.lower() == pattern.lower():
-                    found_col = col
-                    break
-            if found_col:
+            # Check if column contains both "gift" and "officer" or "primary" and "manager"
+            if ('gift' in col_lower and 'officer' in col_lower) or ('primary' in col_lower and 'manager' in col_lower):
+                found_col = col
                 break
         
         # If we found a gift officer column, rename it to Primary_Manager
@@ -1172,28 +1164,18 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     # FINAL CHECK: Ensure Primary_Manager exists (for gift officer charts)
     # This is a last resort check after all other processing
     if 'Primary_Manager' not in df.columns:
-        # Search for gift officer columns with specific patterns (more precise)
-        gift_officer_patterns = [
-            'Gift Officer', 'Gift_Officer', 'gift_officer', 'gift officer',
-            'Primary_Manager', 'Primary Manager', 'primary_manager',
-            'Manager', 'manager'
-        ]
+        # Search for gift officer columns - check all columns
         found_col = None
-        # First try exact matches
-        for pattern in gift_officer_patterns:
-            if pattern in df.columns:
-                found_col = pattern
+        for col in df.columns:
+            col_lower = col.lower().strip()
+            # Check for exact matches first
+            if col_lower in ['gift officer', 'gift_officer', 'primary_manager', 'primary manager']:
+                found_col = col
                 break
-        # If not found, try case-insensitive match
-        if not found_col:
-            for col in df.columns:
-                col_lower = col.lower().strip()
-                for pattern in gift_officer_patterns:
-                    if col_lower == pattern.lower().strip():
-                        found_col = col
-                        break
-                if found_col:
-                    break
+            # Check if column contains both "gift" and "officer" or "primary" and "manager"
+            if ('gift' in col_lower and 'officer' in col_lower) or ('primary' in col_lower and 'manager' in col_lower):
+                found_col = col
+                break
         
         # If we found a gift officer column, rename it to Primary_Manager
         if found_col:
