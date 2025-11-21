@@ -117,23 +117,32 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
 
     try:
         if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-            st.sidebar.info(f"📥 Downloading dataset from Kaggle: {KAGGLE_DATASET}")
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600, env=env)
-        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-            st.sidebar.success("✅ Kaggle dataset downloaded successfully")
-        return KAGGLE_DOWNLOAD_DIR
-    except subprocess.TimeoutExpired:
-        if STREAMLIT_AVAILABLE:
-            st.sidebar.error("⏱️ Kaggle download timed out after 10 minutes")
-        return None
-    except subprocess.CalledProcessError as err:
-        # Silently fail - Kaggle download is optional
-        # Don't try to decode or log anything to avoid any possibility of crashing
-        # Just return None to allow fallback to other data sources
-        return None
-    except Exception as e:
-        # Catch any other exceptions (including AttributeError from decode)
-        # Silently fail - Kaggle download is optional
+            try:
+                st.sidebar.info(f"📥 Downloading dataset from Kaggle: {KAGGLE_DATASET}")
+            except Exception:
+                pass  # Even sidebar messages can fail
+        try:
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600, env=env)
+            if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                try:
+                    st.sidebar.success("✅ Kaggle dataset downloaded successfully")
+                except Exception:
+                    pass
+            return KAGGLE_DOWNLOAD_DIR
+        except subprocess.TimeoutExpired:
+            # Silently fail - don't log to avoid any issues
+            return None
+        except subprocess.CalledProcessError:
+            # Silently fail - Kaggle download is optional
+            # Don't try to access err.stdout or err.stderr to avoid decode errors
+            # Just return None to allow fallback to other data sources
+            return None
+        except Exception:
+            # Catch any other exceptions (including AttributeError, OSError, etc.)
+            # Silently fail - Kaggle download is optional
+            return None
+    except Exception:
+        # Outer catch-all - ensure nothing escapes
         return None
 
 
@@ -586,15 +595,11 @@ def _load_full_dataset_internal():
     kaggle_dir = None
     try:
         kaggle_dir = _download_kaggle_dataset_if_needed()
-    except Exception as e:
+    except Exception:
         # Silently continue - Kaggle download is optional
-        # Only log if verbose mode is enabled, and wrap in try/except to be extra safe
-        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-            try:
-                error_str = str(e)
-                st.sidebar.info(f"⚠️ Kaggle download skipped: {error_str}. Trying other data sources...")
-            except Exception:
-                pass  # Even error logging can fail, so be extra safe
+        # Don't try to access exception attributes to avoid any decode/string errors
+        # Just continue to try other data sources
+        pass
 
     # Get paths from config
     data_paths = settings.get_data_paths()
