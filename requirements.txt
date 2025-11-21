@@ -19,6 +19,7 @@ plotly>=5.10.0
 
 # Web Dashboard
 streamlit>=1.20.0
+kaggle>=1.5.16
 
 # Optional Performance Boosters
 polars>=0.18.0  # Faster CSV processing

@@ -7,8 +7,8 @@ from pathlib import Path
 import os
 
 PAGE_CONFIG = {
-    "page_title": "DonorAI Analytics | Predictive Fundraising Platform",
-    "page_icon": "📊",
+    "page_title": "Fictitious U",
+    "page_icon": "🎓",
     "layout": "wide",
     "initial_sidebar_state": "expanded"
 }

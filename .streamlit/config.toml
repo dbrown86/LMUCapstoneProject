@@ -2,6 +2,10 @@
 # Hide the default Streamlit menu
 hideTopBar = true
 
+[client]
+showSidebarNavigation = false
+toolbarMode = "minimal"
+
 [server]
 # Disable automatic page discovery (if supported)
 # Note: This might not fully disable page navigation, but helps
