@@ -125,48 +125,10 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
         except (OSError, AttributeError):
             pass  # chmod not available on Windows or file system doesn't support it
     
-    # Set User-Agent for Kaggle API (required by some versions)
-    # CRITICAL: Set in both os.environ AND the env dict passed to subprocess
-    # The Kaggle CLI may read from either location
-    
-    # Determine the User-Agent value
-    user_agent_value = "streamlit-dashboard/1.0"  # Default
-    if STREAMLIT_AVAILABLE:
-        try:
-            if hasattr(st, 'secrets') and 'KAGGLE_USER_AGENT' in st.secrets:
-                secret_value = str(st.secrets['KAGGLE_USER_AGENT']).strip()
-                if secret_value and secret_value != "None" and secret_value.lower() != "none":
-                    user_agent_value = secret_value
-        except Exception:
-            pass  # Use default if secrets access fails
-    
-    # Ensure it's always a valid non-empty string
-    user_agent_value = str(user_agent_value).strip() or "streamlit-dashboard/1.0"
-    
-    # Set in the actual environment (for any code that reads os.environ directly)
-    # CRITICAL: Remove any existing value first (in case it's the string "None")
-    if "KAGGLE_USER_AGENT" in os.environ:
-        del os.environ["KAGGLE_USER_AGENT"]
-    os.environ["KAGGLE_USER_AGENT"] = user_agent_value
-    
-    # Also set in the env dict passed to subprocess
+    # Pass environment variables to subprocess
+    # Remove KAGGLE_USER_AGENT entirely - it's not required and causes issues
     env = os.environ.copy()
-    # Double-check: ensure it's set and not None
-    if "KAGGLE_USER_AGENT" not in env or not env["KAGGLE_USER_AGENT"] or env["KAGGLE_USER_AGENT"] == "None":
-        env["KAGGLE_USER_AGENT"] = user_agent_value
-    
-    # Final safety check: if somehow it's still invalid, remove it entirely
-    # Some versions of Kaggle CLI work without User-Agent
-    if env.get("KAGGLE_USER_AGENT") in (None, "None", ""):
-        # Remove it entirely rather than setting to None
-        env.pop("KAGGLE_USER_AGENT", None)
-        if "KAGGLE_USER_AGENT" in os.environ:
-            del os.environ["KAGGLE_USER_AGENT"]
-    else:
-        # Ensure it's a valid string
-        env["KAGGLE_USER_AGENT"] = str(env["KAGGLE_USER_AGENT"]).strip()
-        if not env["KAGGLE_USER_AGENT"]:
-            env.pop("KAGGLE_USER_AGENT", None)
+    env.pop("KAGGLE_USER_AGENT", None)  # Remove if it exists to avoid None errors
     
     # Build command with dataset name from secrets
     cmd = [
@@ -953,23 +915,32 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         'Primary_Manager': 'Primary_Manager'  # Keep if already exists
     }
     
-    # Merge mappings
-    column_mapping.update(extended_mapping)
-    
-    # Handle Primary_Manager mapping specially - if Primary_Manager already exists, don't map Gift Officer columns
-    # Otherwise, map Gift Officer columns to Primary_Manager
-    if 'Primary_Manager' not in df.columns:
-        # Map gift officer columns to Primary_Manager
+    # Handle Primary_Manager mapping specially BEFORE merging
+    # If Primary_Manager already exists, don't map Gift Officer columns
+    # Otherwise, map the first Gift Officer column found to Primary_Manager
+    if 'Primary_Manager' in df.columns:
+        # Primary_Manager already exists, remove gift officer mappings to avoid conflicts
+        extended_mapping.pop('Gift Officer', None)
+        extended_mapping.pop('Gift_Officer', None)
+        extended_mapping.pop('gift_officer', None)
+        extended_mapping.pop('Primary_Manager', None)  # Don't map to itself
+    else:
+        # Primary_Manager doesn't exist, find and map the first Gift Officer column
         gift_officer_cols = ['Gift Officer', 'Gift_Officer', 'gift_officer']
+        found_gift_officer = False
         for col in gift_officer_cols:
             if col in df.columns:
-                column_mapping[col] = 'Primary_Manager'
-                break  # Only map the first one found
-    else:
-        # Primary_Manager already exists, remove gift officer mappings to avoid conflicts
-        column_mapping.pop('Gift Officer', None)
-        column_mapping.pop('Gift_Officer', None)
-        column_mapping.pop('gift_officer', None)
+                # Only map the first one found
+                extended_mapping[col] = 'Primary_Manager'
+                # Remove other gift officer mappings to avoid conflicts
+                for other_col in gift_officer_cols:
+                    if other_col != col:
+                        extended_mapping.pop(other_col, None)
+                found_gift_officer = True
+                break
+    
+    # Merge mappings
+    column_mapping.update(extended_mapping)
     
     # Only rename columns that exist
     existing_renames = {k: v for k, v in column_mapping.items() if k in df.columns}
