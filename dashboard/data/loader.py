@@ -302,6 +302,10 @@ def _get_essential_columns() -> List[str]:
         # Other useful features
         'years_active', 'Years_Active',
         'consecutive_years', 'Consecutive_Years',
+        # Gift officer assignment (for dashboard charts)
+        'Primary_Manager', 'Gift Officer', 'Gift_Officer', 'gift_officer', 'GiftOfficer',
+        # Capacity rating (for take_action page)
+        'Rating', 'rating', 'capacity', 'Capacity',
     ]
 
 
