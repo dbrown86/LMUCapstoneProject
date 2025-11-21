@@ -29,7 +29,7 @@ except ImportError:
 
 KAGGLE_DATASET = os.getenv("KAGGLE_DATASET")
 KAGGLE_DOWNLOAD_DIR = Path(os.getenv("KAGGLE_DOWNLOAD_DIR", "/tmp/kaggle_data")).resolve()
-KAGGLE_DONOR_FILE_HINTS = ["donors.csv", "donors_with_network_features.csv", "donors_full.csv"]
+KAGGLE_KNOWN_CSVS = {"donors.csv", "contacts.csv", "events.csv", "family.csv", "giving.csv", "relationships.csv"}
 
 
 def _download_kaggle_dataset_if_needed() -> Optional[Path]:
@@ -51,8 +51,7 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
         return None
 
     # If files already exist, reuse them.
-    existing_files = list(KAGGLE_DOWNLOAD_DIR.glob("*"))
-    if existing_files:
+    if any(KAGGLE_DOWNLOAD_DIR.iterdir()):
         return KAGGLE_DOWNLOAD_DIR
 
     kaggle_cli = shutil.which("kaggle")
@@ -102,6 +101,27 @@ def load_full_dataset(use_cache: bool = True):
         return _load_full_dataset_internal()
 
 
+def _resolve_kaggle_csv_dir() -> Optional[Path]:
+    """
+    Locate the directory that actually contains the Kaggle CSV files,
+    accounting for Kaggle's tendency to unzip into a subfolder.
+    """
+    if not KAGGLE_DOWNLOAD_DIR.exists():
+        return None
+    # If CSVs exist at top level, use that.
+    top_level_csvs = list(KAGGLE_DOWNLOAD_DIR.glob("*.csv"))
+    if top_level_csvs:
+        return KAGGLE_DOWNLOAD_DIR
+    # Otherwise search subdirectories for the known CSV names.
+    for subdir in KAGGLE_DOWNLOAD_DIR.glob("**"):
+        if not subdir.is_dir():
+            continue
+        csvs = {p.name for p in subdir.glob("*.csv")}
+        if KAGGLE_KNOWN_CSVS.intersection(csvs):
+            return subdir
+    return None
+
+
 def _load_full_dataset_internal():
     """Internal function to load dataset (without caching decorator)."""
     root = settings.get_project_root()
@@ -118,7 +138,9 @@ def _load_full_dataset_internal():
 
     if kaggle_dir:
         parquet_paths.insert(0, str(kaggle_dir / "donors_with_network_features.parquet"))
-        csv_dir_candidates.insert(0, str(kaggle_dir))
+        resolved_csv_dir = _resolve_kaggle_csv_dir()
+        if resolved_csv_dir:
+            csv_dir_candidates.insert(0, str(resolved_csv_dir))
     
     # Priority 1: Try Parquet file (fastest - use pyarrow engine)
     for path in parquet_paths:
@@ -150,18 +172,18 @@ def _load_full_dataset_internal():
             csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
             if csv_files:
                 csv_dir_path = Path(csv_dir).resolve()
-                if kaggle_dir and csv_dir_path == kaggle_dir:
-                    donor_file = None
-                    for hint in KAGGLE_DONOR_FILE_HINTS:
-                        candidate = csv_dir_path / hint
+                if KAGGLE_DOWNLOAD_DIR in csv_dir_path.parents or csv_dir_path == KAGGLE_DOWNLOAD_DIR:
+                    donor_path = None
+                    for name in ["donors.csv", "donors_with_network_features.csv", "donors_full.csv"]:
+                        candidate = csv_dir_path / name
                         if candidate.exists():
-                            donor_file = candidate
+                            donor_path = candidate
                             break
-                    if not donor_file:
-                        # fallback to first file if hint not found
-                        donor_file = csv_dir_path / csv_files[0]
-                    df = pd.read_csv(donor_file)
-                    return process_dataframe(df)
+                    if not donor_path and csv_files:
+                        donor_path = csv_dir_path / csv_files[0]
+                    if donor_path and donor_path.exists():
+                        df = pd.read_csv(donor_path)
+                        return process_dataframe(df)
                 else:
                     dfs = []
                     for csv_file in csv_files[:5]:
