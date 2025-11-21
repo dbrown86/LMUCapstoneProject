@@ -95,6 +95,10 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
         except (OSError, AttributeError):
             pass  # chmod not available on Windows or file system doesn't support it
     
+    # Set User-Agent for Kaggle API (required by some versions)
+    if not os.getenv("KAGGLE_USER_AGENT"):
+        os.environ["KAGGLE_USER_AGENT"] = "streamlit-dashboard/1.0"
+    
     cmd = [
         kaggle_cli,
         "datasets",
@@ -141,6 +145,8 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
                 st.sidebar.warning("💡 Check that KAGGLE_USERNAME and KAGGLE_KEY are correct in Streamlit secrets")
             elif "404" in error_msg or "not found" in error_msg.lower():
                 st.sidebar.warning(f"💡 Verify dataset name is correct: {KAGGLE_DATASET}")
+            elif "User-Agent" in error_msg or "NoneType" in error_msg:
+                st.sidebar.warning("💡 Kaggle API configuration issue. Check that credentials are set correctly.")
         return None
 
 
