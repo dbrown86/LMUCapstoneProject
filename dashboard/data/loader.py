@@ -628,8 +628,8 @@ def _load_full_dataset_internal():
     for path in parquet_paths:
         if os.path.exists(path):
             try:
-                    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-                        st.sidebar.info(f"📦 Loading optimized Parquet: {Path(path).name}")
+                if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                    st.sidebar.info(f"📦 Loading optimized Parquet: {Path(path).name}")
                 df = pd.read_parquet(path, engine='pyarrow')
                 return process_dataframe(df)
             except Exception as e:
@@ -716,8 +716,8 @@ def _load_full_dataset_internal():
                 try:
                     csv_path = Path(p)
                     if csv_path.exists() and csv_path.stat().st_size > 0:
-                    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-                        st.sidebar.info(f"📂 Trying CSV: {csv_path.name}")
+                        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                            st.sidebar.info(f"📂 Trying CSV: {csv_path.name}")
                         df = _load_csv_with_essential_columns(csv_path)
                         if df is not None:
                             return process_dataframe(df)
