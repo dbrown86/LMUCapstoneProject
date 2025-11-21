@@ -521,13 +521,88 @@ def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
         return None
 
 
+def _load_csv_with_essential_columns(csv_path: Path, chunk_size: int = 50000) -> Optional[pd.DataFrame]:
+    """
+    Load CSV file with only essential columns in chunks to avoid OOM.
+    This is a fault-tolerant approach that works with any CSV source.
+    
+    Args:
+        csv_path: Path to CSV file
+        chunk_size: Number of rows to process at a time
+        
+    Returns:
+        DataFrame with essential columns only, or None if loading fails
+    """
+    try:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.info(f"📂 Loading {csv_path.name} with essential columns only...")
+        
+        essential_cols = _get_essential_columns()
+        
+        # First, read a small sample to identify which columns exist
+        sample = pd.read_csv(csv_path, nrows=100, low_memory=False)
+        available_cols = [col for col in essential_cols if col in sample.columns]
+        # Also include feature columns for features page
+        feature_cols = [col for col in sample.columns if any(
+            pattern in col.lower() for pattern in ['_count', '_sum', '_mean', '_max', '_min', 'network', 'degree']
+        )]
+        selected_cols = list(set(available_cols + feature_cols))
+        
+        if not selected_cols:
+            if STREAMLIT_AVAILABLE:
+                st.sidebar.warning(f"No essential columns found in {csv_path.name}")
+            return None
+        
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.info(f"   Loading {len(selected_cols)} columns (out of {len(sample.columns)} total)")
+        
+        # Read CSV in chunks with selected columns
+        chunks = []
+        total_rows = 0
+        
+        for chunk in pd.read_csv(csv_path, chunksize=chunk_size, low_memory=False, usecols=selected_cols):
+            chunks.append(chunk)
+            total_rows += len(chunk)
+            
+            if STREAMLIT_AVAILABLE and total_rows % 100000 == 0:
+                st.sidebar.info(f"   Loaded {total_rows:,} rows...")
+        
+        if not chunks:
+            return None
+        
+        # Combine chunks
+        df = pd.concat(chunks, ignore_index=True)
+        
+        # Optimize data types
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.info("   Optimizing data types...")
+        df = _optimize_dtypes(df)
+        
+        memory_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
+        
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.success(f"✅ Loaded {len(df):,} rows, {len(df.columns)} cols (~{memory_mb:.0f}MB)")
+        
+        return df
+    except Exception as e:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.warning(f"Failed to load {csv_path.name}: {e}")
+        return None
+
+
 def _load_full_dataset_internal():
     """Internal function to load dataset (without caching decorator)."""
     root = settings.get_project_root()
     data_dir_env = os.getenv("LMU_DATA_DIR")
     env_dir = Path(data_dir_env).resolve() if data_dir_env else None
     
-    kaggle_dir = _download_kaggle_dataset_if_needed()
+    # Try Kaggle download (non-blocking - if it fails, continue with other sources)
+    kaggle_dir = None
+    try:
+        kaggle_dir = _download_kaggle_dataset_if_needed()
+    except Exception as e:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.info(f"⚠️ Kaggle download skipped: {e}. Trying other data sources...")
 
     # Get paths from config
     data_paths = settings.get_data_paths()
@@ -535,62 +610,77 @@ def _load_full_dataset_internal():
     sqlite_paths = data_paths['sqlite_paths']
     csv_dir_candidates = data_paths['csv_dir_candidates']
 
-    # If Kaggle dataset was downloaded, create optimized Parquet (essential columns + dtype optimization)
+    # If Kaggle dataset was downloaded, try to create optimized Parquet
     if kaggle_dir:
-        resolved_csv_dir = _resolve_kaggle_csv_dir()
-        if resolved_csv_dir:
-            # Priority: Create optimized Parquet (essential columns only, optimized dtypes, full 500K rows)
-            if KAGGLE_CACHED_PARQUET.exists():
-                parquet_paths.insert(0, str(KAGGLE_CACHED_PARQUET))
-            else:
-                # Convert CSV to optimized Parquet (handles full 500K rows with memory optimization)
-                cached_parquet = _convert_kaggle_csv_to_optimized_parquet(resolved_csv_dir)
-                if cached_parquet:
-                    parquet_paths.insert(0, str(cached_parquet))
-            
-            csv_dir_candidates.insert(0, str(resolved_csv_dir))
+        try:
+            resolved_csv_dir = _resolve_kaggle_csv_dir()
+            if resolved_csv_dir:
+                # Check for existing optimized Parquet first
+                if KAGGLE_CACHED_PARQUET.exists():
+                    parquet_paths.insert(0, str(KAGGLE_CACHED_PARQUET))
+                else:
+                    # Try to create optimized Parquet (non-blocking)
+                    try:
+                        cached_parquet = _convert_kaggle_csv_to_optimized_parquet(resolved_csv_dir)
+                        if cached_parquet:
+                            parquet_paths.insert(0, str(cached_parquet))
+                    except Exception as e:
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.info(f"⚠️ Parquet conversion skipped: {e}. Trying direct CSV load...")
+                        # Add CSV directory as fallback
+                        csv_dir_candidates.insert(0, str(resolved_csv_dir))
+        except Exception:
+            pass  # Continue with other sources
     
     # Priority 1: Try optimized Parquet file (essential columns, optimized dtypes, full 500K rows)
     for path in parquet_paths:
         if os.path.exists(path):
             try:
+                if STREAMLIT_AVAILABLE:
+                    st.sidebar.info(f"📦 Loading optimized Parquet: {Path(path).name}")
                 df = pd.read_parquet(path, engine='pyarrow')
                 return process_dataframe(df)
             except Exception as e:
                 if STREAMLIT_AVAILABLE:
-                    st.sidebar.warning(f"Failed to load {path}: {e}")
+                    st.sidebar.warning(f"⚠️ Failed to load {path}: {e}")
     
-    # Priority 3: Try CSV parts (load fewer files for speed)
+    # Priority 2: Try loading CSV with essential columns only (fault-tolerant, works with any CSV)
     csv_dir = next((p for p in csv_dir_candidates if os.path.exists(p)), None)
     if csv_dir and os.path.exists(csv_dir):
         try:
-            csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
-            if csv_files:
-                csv_dir_path = Path(csv_dir).resolve()
-                if KAGGLE_DOWNLOAD_DIR in csv_dir_path.parents or csv_dir_path == KAGGLE_DOWNLOAD_DIR:
-                    donor_path = None
-                    for name in ["donors.csv", "donors_with_network_features.csv", "donors_full.csv"]:
-                        candidate = csv_dir_path / name
-                        if candidate.exists():
-                            donor_path = candidate
-                            break
-                    if not donor_path and csv_files:
+            csv_dir_path = Path(csv_dir).resolve()
+            
+            # Look for main donor CSV files
+            donor_csv_names = ["donors.csv", "donors_with_network_features.csv", "donors_full.csv"]
+            donor_path = None
+            
+            for name in donor_csv_names:
+                candidate = csv_dir_path / name
+                if candidate.exists():
+                    donor_path = candidate
+                    break
+            
+            # If not found, look for any CSV in the directory
+            if not donor_path:
+                csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
+                if csv_files:
+                    # Prefer files with "donor" in the name
+                    donor_files = [f for f in csv_files if 'donor' in f.lower()]
+                    if donor_files:
+                        donor_path = csv_dir_path / donor_files[0]
+                    else:
                         donor_path = csv_dir_path / csv_files[0]
-                    if donor_path and donor_path.exists():
-                        df = pd.read_csv(donor_path)
-                        return process_dataframe(df)
-                else:
-                    dfs = []
-                    for csv_file in csv_files[:5]:
-                        df_part = pd.read_csv(os.path.join(csv_dir, csv_file))
-                        dfs.append(df_part)
-                    df = pd.concat(dfs, ignore_index=True)
+            
+            if donor_path and donor_path.exists():
+                # Load with essential columns only (fault-tolerant)
+                df = _load_csv_with_essential_columns(donor_path)
+                if df is not None:
                     return process_dataframe(df)
         except Exception as e:
             if STREAMLIT_AVAILABLE:
-                st.sidebar.warning(f"Failed to load CSV parts: {e}")
+                st.sidebar.warning(f"⚠️ Failed to load CSV from {csv_dir}: {e}")
     
-    # Priority 4: Glob search for Parquet across project and env dir
+    # Priority 3: Glob search for Parquet across project and env dir
     parquet_patterns = []
     if env_dir:
         parquet_patterns.append(str(env_dir / "**/*.parquet"))
@@ -602,9 +692,46 @@ def _load_full_dataset_internal():
         try:
             for p in glob.glob(pattern, recursive=True):
                 try:
+                    if STREAMLIT_AVAILABLE:
+                        st.sidebar.info(f"📦 Trying Parquet: {Path(p).name}")
                     df = pd.read_parquet(p, engine='pyarrow')
+                    # Select only essential columns if dataset is large
+                    if len(df) > 100000:
+                        essential_cols = _get_essential_columns()
+                        available_cols = [col for col in essential_cols if col in df.columns]
+                        if available_cols:
+                            df = df[available_cols]
+                            df = _optimize_dtypes(df)
                     return process_dataframe(df)
-                except Exception:
+                except Exception as e:
+                    if STREAMLIT_AVAILABLE:
+                        st.sidebar.info(f"⚠️ Skipped {Path(p).name}: {e}")
+                    continue
+        except Exception:
+            pass
+    
+    # Priority 4: Glob search for CSV files and load with essential columns
+    csv_patterns = []
+    if env_dir:
+        csv_patterns.append(str(env_dir / "**/donors*.csv"))
+    csv_patterns.extend([
+        str(root / "data/**/donors*.csv"),
+        str(root / "**/donors*.csv"),
+    ])
+    for pattern in csv_patterns:
+        try:
+            for p in glob.glob(pattern, recursive=True):
+                try:
+                    csv_path = Path(p)
+                    if csv_path.exists() and csv_path.stat().st_size > 0:
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.info(f"📂 Trying CSV: {csv_path.name}")
+                        df = _load_csv_with_essential_columns(csv_path)
+                        if df is not None:
+                            return process_dataframe(df)
+                except Exception as e:
+                    if STREAMLIT_AVAILABLE:
+                        st.sidebar.info(f"⚠️ Skipped {Path(p).name}: {e}")
                     continue
         except Exception:
             pass
