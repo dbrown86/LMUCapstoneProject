@@ -128,14 +128,24 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     # Set User-Agent for Kaggle API (required by some versions)
     # Pass environment variables explicitly to subprocess
     env = os.environ.copy()
-    # Ensure KAGGLE_USER_AGENT is always a valid string (never None or empty)
-    kaggle_user_agent = env.get("KAGGLE_USER_AGENT")
-    if not kaggle_user_agent or kaggle_user_agent == "None" or not isinstance(kaggle_user_agent, str):
-        env["KAGGLE_USER_AGENT"] = "streamlit-dashboard/1.0"
-    else:
-        env["KAGGLE_USER_AGENT"] = str(kaggle_user_agent).strip()
-        if not env["KAGGLE_USER_AGENT"]:  # If it's an empty string after stripping
-            env["KAGGLE_USER_AGENT"] = "streamlit-dashboard/1.0"
+    
+    # Always explicitly set a valid User-Agent string (never None)
+    # Remove any existing KAGGLE_USER_AGENT first to avoid conflicts
+    env.pop("KAGGLE_USER_AGENT", None)  # Remove if exists (handles string "None" case)
+    
+    # Check if there's a valid value in Streamlit secrets
+    user_agent_value = "streamlit-dashboard/1.0"  # Default
+    if STREAMLIT_AVAILABLE:
+        try:
+            if hasattr(st, 'secrets') and 'KAGGLE_USER_AGENT' in st.secrets:
+                secret_value = str(st.secrets['KAGGLE_USER_AGENT']).strip()
+                if secret_value and secret_value != "None" and secret_value.lower() != "none":
+                    user_agent_value = secret_value
+        except Exception:
+            pass  # Use default if secrets access fails
+    
+    # Always set a valid non-empty string
+    env["KAGGLE_USER_AGENT"] = str(user_agent_value).strip() or "streamlit-dashboard/1.0"
     
     # Build command with dataset name from secrets
     cmd = [
