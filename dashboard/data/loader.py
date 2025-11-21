@@ -958,6 +958,33 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     existing_renames = {k: v for k, v in column_mapping.items() if k in df.columns}
     df = df.rename(columns=existing_renames)
     
+    # POST-RENAME CHECK: Ensure Primary_Manager exists after all mappings
+    # If it still doesn't exist, try to find and map any gift officer column
+    if 'Primary_Manager' not in df.columns:
+        # Try to find any column that might be a gift officer column
+        gift_officer_patterns = [
+            'Gift Officer', 'Gift_Officer', 'gift_officer', 'gift officer',
+            'Primary_Manager', 'Primary Manager', 'primary_manager',
+            'Manager', 'manager', 'Officer', 'officer'
+        ]
+        found_col = None
+        for pattern in gift_officer_patterns:
+            # Check exact match first
+            if pattern in df.columns:
+                found_col = pattern
+                break
+            # Check case-insensitive match
+            for col in df.columns:
+                if col.lower() == pattern.lower():
+                    found_col = col
+                    break
+            if found_col:
+                break
+        
+        # If we found a gift officer column, rename it to Primary_Manager
+        if found_col:
+            df = df.rename(columns={found_col: 'Primary_Manager'})
+    
     # Ensure donor_id exists
     if 'donor_id' not in df.columns:
         df['donor_id'] = [f'D{i:06d}' for i in range(len(df))]
@@ -1141,6 +1168,36 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
             np.full(len(df), 'Prospects/New', dtype=object),
             categories=all_segments
         )
+    
+    # FINAL CHECK: Ensure Primary_Manager exists (for gift officer charts)
+    # This is a last resort check after all other processing
+    if 'Primary_Manager' not in df.columns:
+        # Search for gift officer columns with specific patterns (more precise)
+        gift_officer_patterns = [
+            'Gift Officer', 'Gift_Officer', 'gift_officer', 'gift officer',
+            'Primary_Manager', 'Primary Manager', 'primary_manager',
+            'Manager', 'manager'
+        ]
+        found_col = None
+        # First try exact matches
+        for pattern in gift_officer_patterns:
+            if pattern in df.columns:
+                found_col = pattern
+                break
+        # If not found, try case-insensitive match
+        if not found_col:
+            for col in df.columns:
+                col_lower = col.lower().strip()
+                for pattern in gift_officer_patterns:
+                    if col_lower == pattern.lower().strip():
+                        found_col = col
+                        break
+                if found_col:
+                    break
+        
+        # If we found a gift officer column, rename it to Primary_Manager
+        if found_col:
+            df = df.rename(columns={found_col: 'Primary_Manager'})
     
     return df
 
