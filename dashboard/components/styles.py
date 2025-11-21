@@ -12,9 +12,23 @@ def get_css_styles() -> str:
     """
     return """
 <style>
-    .main { background-color: #f8f9fa; }
-    [data-testid="stSidebar"] { background: linear-gradient(180deg, #1e3c72 0%, #2a5298 100%); }
+    /* Background colors are now handled by Streamlit's native theme configuration in .streamlit/config.toml */
+    /* No need to override - Streamlit will apply the theme automatically */
+    
+    /* Sidebar styling - DO NOT CHANGE */
+    [data-testid="stSidebar"] { background: linear-gradient(180deg, #1e3c72 0%, #2a5298 100%) !important; }
     [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] { color: white; }
+    
+    /* Hide Streamlit's default page navigation immediately - highest priority */
+    [data-testid="stSidebarNav"] {display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important;}
+    section[data-testid="stSidebarNav"] {display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important;}
+    nav[data-testid="stSidebarNav"] {display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important;}
+    .css-1544g2n {display: none !important; visibility: hidden !important; opacity: 0 !important; height: 0 !important; overflow: hidden !important;}
+    
+    /* Hide any Streamlit default navigation elements */
+    [data-testid="stSidebar"] [class*="css-"]:first-child:not([class*="ua-title"]) {
+        display: none !important;
+    }
     
     .logo-container {
         text-align: center;
@@ -174,20 +188,15 @@ def get_css_styles() -> str:
     }
     
     .chart-container {
-        background: white;
-        padding: 20px;
+        background: transparent;
+        padding: 0 20px 20px 20px;
         border-radius: 12px;
-        box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-        margin: 15px 0;
+        box-shadow: none;
+        margin: 0 0 15px 0;
     }
     
     #MainMenu {visibility: hidden;}
     footer {visibility: hidden;}
-    
-    /* Hide Streamlit's automatic page navigation */
-    [data-testid="stSidebarNav"] {display: none;}
-    section[data-testid="stSidebarNav"] {display: none;}
-    .css-1544g2n {display: none;}  /* Legacy selector for page nav */
     
     /* Do not blanket-hide Streamlit alerts; deprecations filtered via JS below */
     
@@ -205,6 +214,9 @@ def get_css_styles() -> str:
 </style>
 <script>
 (function() {
+    // Background colors are now handled by Streamlit's native theme configuration
+    // No JavaScript needed for background color - Streamlit handles it automatically
+    
     function hideDeprecationWarnings() {
         // More comprehensive selector to catch all warning elements
         const selectors = [

@@ -1,0 +1,15 @@
+[ui]
+# Hide the default Streamlit menu
+hideTopBar = true
+
+[server]
+# Disable automatic page discovery (if supported)
+# Note: This might not fully disable page navigation, but helps
+
+[theme]
+primaryColor = "#1e3c72"
+backgroundColor = "#000000"
+secondaryBackgroundColor = "#1e1e1e"
+textColor = "#ffffff"
+font = "sans serif"
+

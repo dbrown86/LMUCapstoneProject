@@ -141,7 +141,8 @@ def render(df: pd.DataFrame):
             colorbar=dict(title="Importance")
         ),
         text=feature_importance['importance'].round(4),
-        textposition='outside'
+        textposition='outside',
+        textfont=dict(weight='bold')
     ))
     
     fig.update_layout(
@@ -291,7 +292,7 @@ def render(df: pd.DataFrame):
                             'Mean': [np.mean(gave_values), np.mean(not_gave_values)],
                             'Median': [np.median(gave_values), np.median(not_gave_values)],
                             'Std Dev': [np.std(gave_values), np.std(not_gave_values)],
-                            'Count': [len(gave_values), len(not_gave_values)]
+                            'Count': [f"{len(gave_values):,}", f"{len(not_gave_values):,}"]
                         })
                         st.dataframe(stats_df, width='stretch', hide_index=True)
             
@@ -435,6 +436,10 @@ def render(df: pd.DataFrame):
                                 # Sort by feature mean
                                 bin_stats = bin_stats.sort_values('feature_mean').reset_index(drop=True)
                                 
+                                # Prepare text labels with adaptive placement so they stay visible
+                                text_values = [f"{rate:.1%}" for rate in bin_stats['outcome_rate']]
+                                text_positions = ['inside' if rate >= 0.35 else 'outside' for rate in bin_stats['outcome_rate']]
+                                
                                 # Create bar chart
                                 fig_bins = go.Figure()
                                 fig_bins.add_trace(go.Bar(
@@ -446,15 +451,19 @@ def render(df: pd.DataFrame):
                                         showscale=True,
                                         colorbar=dict(title="Outcome Rate")
                                     ),
-                                    text=[f"{row['outcome_rate']:.1%}" for _, row in bin_stats.iterrows()],
-                                    textposition='outside',
+                                    text=text_values,
+                                    textposition=text_positions,
+                                    insidetextanchor='middle',
+                                    insidetextfont=dict(color='#ffffff', size=12),
+                                    outsidetextfont=dict(color='#e5e7eb', size=12),
                                     hovertemplate=(
                                         "Feature Value: %{x}<br>" +
                                         "Outcome Rate: %{y:.1%}<br>" +
                                         "Sample Size: %{customdata}<br>" +
                                         "<extra></extra>"
                                     ),
-                                    customdata=bin_stats['count']
+                                    customdata=bin_stats['count'],
+                                    cliponaxis=False
                                 ))
                                 
                                 fig_bins.update_layout(
@@ -464,10 +473,11 @@ def render(df: pd.DataFrame):
                                     height=400,
                                     plot_bgcolor='rgba(0,0,0,0)',
                                     paper_bgcolor='rgba(0,0,0,0)',
-                                    yaxis=dict(range=[0, 1], tickformat='.0%')
+                                    yaxis=dict(range=[0, 1], tickformat='.0%'),
+                                    margin=dict(t=70, b=70)
                                 )
                                 plotly_chart_no_warnings(fig_bins, width='stretch')
-                                st.caption(f"💡 **Insight**: Shows how the likelihood of giving again changes across different values of {selected_feature}. Higher bars indicate feature values associated with better outcomes.")
+                                st.markdown(f"**💡 How to read**: Shows how the likelihood of giving again changes across different values of {selected_feature}. Higher bars indicate feature values associated with better outcomes.", unsafe_allow_html=True)
                             else:
                                 st.info("Could not create bins for this feature.")
                     except Exception as e:

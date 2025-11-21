@@ -509,7 +509,7 @@ def render(df: pd.DataFrame):
             hovermode='closest'
         )
         plotly_chart_silent(fig_radar, config={'displayModeBar': True, 'displaylogo': False})
-        st.caption(
-            "💡 **How to read**: If the green polygon extends farther than the red shape on a given axis, the fusion model beats the baseline on that metric.",
+        st.markdown(
+            "**💡 How to read**: If the green polygon extends farther than the red shape on a given axis, the fusion model beats the baseline on that metric.",
             unsafe_allow_html=True
         )

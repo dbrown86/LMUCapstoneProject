@@ -88,14 +88,6 @@ def render(df: pd.DataFrame = None):
         else:
             st.warning("⚠️ Architecture diagram file not found. Tried paths: " + ", ".join([str(p) for p in possible_paths]))
         
-        st.markdown("---")
-        st.markdown("""
-        **Key Components:**
-        - **6-Layer Pipeline**: Data generation → Preprocessing → Feature engineering → Model training → Evaluation → Deployment
-        - **Multimodal Fusion**: Combines GNN, RNN, LSTM, CNN, and MLP architectures
-        - **End-to-End Learning**: All components trained jointly for optimal performance
-        - **Interactive Dashboard**: Real-time predictions and insights via Streamlit
-        """)
     
     # Tab 2: Dataset Overview
     with tab2:
@@ -164,23 +156,43 @@ def render(df: pd.DataFrame = None):
         col1, col2 = st.columns(2)
         
         with col1:
-            st.markdown("**High Capacity Tiers:**")
-            for rating in ['A', 'B', 'C', 'D', 'E', 'F', 'G', 'H']:
-                capacity = rating_capacities[rating]
-                st.markdown(f"- **Rating {rating}**: {capacity}")
+            st.markdown("""
+            <div style="font-family: inherit; font-size: inherit;">
+            <strong>High Capacity Tiers:</strong><br>
+            • <strong>Rating A</strong>: $100M+<br>
+            • <strong>Rating B</strong>: $50M - $99.9M<br>
+            • <strong>Rating C</strong>: $25M - $49.9M<br>
+            • <strong>Rating D</strong>: $10M - $24.9M<br>
+            • <strong>Rating E</strong>: $5M - $9.9M<br>
+            • <strong>Rating F</strong>: $1M - $4.9M<br>
+            • <strong>Rating G</strong>: $500K - $999.9K<br>
+            • <strong>Rating H</strong>: $250K - $499.9K
+            </div>
+            """, unsafe_allow_html=True)
         
         with col2:
-            st.markdown("**Standard Capacity Tiers:**")
-            for rating in ['I', 'J', 'K', 'L', 'M', 'N', 'O', 'P']:
-                capacity = rating_capacities[rating]
-                st.markdown(f"- **Rating {rating}**: {capacity}")
+            st.markdown("""
+            <div style="font-family: inherit; font-size: inherit;">
+            <strong>Standard Capacity Tiers:</strong><br>
+            • <strong>Rating I</strong>: $100K - $249.9K<br>
+            • <strong>Rating J</strong>: $50K - $99.9K<br>
+            • <strong>Rating K</strong>: $25K - $49.9K<br>
+            • <strong>Rating L</strong>: $10K - $24.9K<br>
+            • <strong>Rating M</strong>: $5K - $9.9K<br>
+            • <strong>Rating N</strong>: $2.5K - $4.9K<br>
+            • <strong>Rating O</strong>: $1K - $2.4K<br>
+            • <strong>Rating P</strong>: Less than $1K
+            </div>
+            """, unsafe_allow_html=True)
         
         st.markdown("""
-        **Distribution Summary:**
-        - **Top Tier (A)**: 43 donors (0.09%) - $100M+ capacity
-        - **Middle Tiers (I-P)**: Majority of donors (87.5%)
-        - **Most Common**: Rating L (7,381 donors, 14.76%) - $10K-$24.9K capacity
-        """)
+        <div style="font-family: inherit; font-size: inherit;">
+        <strong>Distribution Summary:</strong><br>
+        • <strong>Top Tier (A)</strong>: 43 donors (0.09%) - $100M+ capacity<br>
+        • <strong>Middle Tiers (I-P)</strong>: Majority of donors (87.5%)<br>
+        • <strong>Most Common</strong>: Rating L (7,381 donors, 14.76%) - $10K - $24.9K capacity
+        </div>
+        """, unsafe_allow_html=True)
         
         st.markdown("---")
         
@@ -248,38 +260,44 @@ def render(df: pd.DataFrame = None):
         
         with col1:
             st.markdown("""
-            **🔗 Graph Neural Network (GNN)**
-            - Purpose: Captures donor relationships and network effects
-            - Input: Family connections, relationship types
-            - Output: 64-dimensional graph embeddings
+            **📊 Tabular Encoder (MLP)**
+            - Purpose: Processes engineered donor features
+            - Input: 60 selected features (RFM, recency, engagement, capacity, temporal, network)
+            - Architecture: Residual connections, BatchNorm, GELU activation
+            - Output: 256-dimensional representations
             
-            **🔄 Recurrent Neural Network (RNN)**
-            - Purpose: Models sequential giving patterns
-            - Input: Temporal giving history
-            - Output: Sequential pattern representations
+            **📝 Sequence Encoder (LSTM + Attention + CNN)**
+            - Purpose: Captures temporal giving patterns and long-term dependencies
+            - Input: Last 12 gift amounts per donor
+            - Architecture: Bidirectional LSTM → Self-attention → 1D Convolution
+            - Output: 256-dimensional sequential representations
             
-            **📝 Long Short-Term Memory (LSTM)**
-            - Purpose: Captures long-term temporal dependencies
-            - Input: Historical giving sequences
-            - Output: Long-term memory representations
+            **🔗 Network Encoder (MLP)**
+            - Purpose: Processes pre-computed network centrality features
+            - Input: Network size, PageRank, degree centrality, influence scores (5 features)
+            - Output: 64-dimensional network representations
             """)
         
         with col2:
             st.markdown("""
-            **🖼️ Convolutional Neural Network (CNN)**
-            - Purpose: Feature extraction from structured data
-            - Input: Tabular feature matrices
-            - Output: Learned feature representations
+            **📝 Text Encoder (MLP with SVD)**
+            - Purpose: Encodes contact report engagement metrics
+            - Input: Aggregate text features (number of reports, avg text length, recent contacts) compressed via SVD to 32 dimensions
+            - Architecture: Linear projection (32→32) → LayerNorm → GELU → Linear (32→64)
+            - Output: 64-dimensional text representations
+            - **Current Limitation**: Only uses metadata (count, length, recency) - actual text content and semantic meaning are not extracted
             
-            **📊 Multi-Layer Perceptron (MLP)**
-            - Purpose: Processes tabular donor features
-            - Input: 50+ engineered features
-            - Output: 128-dimensional representations
+            **🔗 Cross-Modal Attention**
+            - Purpose: Fuses tabular and sequence modalities
+            - Architecture: Multi-head attention (4 heads)
+            - Method: Attends tabular features to sequence features
+            - Output: 256-dimensional attended representations
             
             **🔗 Fusion Layer**
             - Purpose: Combines all modality outputs
-            - Method: Cross-modal attention + weighted fusion
-            - Output: Unified 256-dimensional representation
+            - Architecture: Residual blocks, LayerNorm, GELU activation
+            - Dimensions: 384 → 512 → 256 → 128 → 1 (final prediction)
+            - Output: Single probability score for "will give again in 2025"
             """)
         
         st.markdown("---")
@@ -287,34 +305,97 @@ def render(df: pd.DataFrame = None):
         st.markdown("#### Training Configuration")
         st.markdown("""
         **Data Splits**:
-        - **Training**: 2021-2022 data
-        - **Validation**: 2023 data
-        - **Test**: 2025 data
+        - **Training**: 1980-2023 historical data
+        - **Validation**: 2024 data
+        - **Test**: 2025 data (prediction target)
         
         **Training Parameters**:
-        - Optimizer: Adam
-        - Loss Function: Cross-Entropy
-        - Regularization: Dropout (0.3), Early Stopping
-        - Batch Size: Optimized for 500K dataset
+        - Optimizer: AdamW
+        - Loss Function: BCE with Logits (with class weights for imbalance)
+        - Learning Rate: 0.0001 (with ReduceLROnPlateau scheduler)
+        - Regularization: Dropout (0.3), Weight Decay (1e-4), Early Stopping
+        - Batch Size: 2048 (optimized for 500K dataset)
+        - Hidden Dimension: 256 (increased capacity for better learning)
         
         **Model Features**:
         - End-to-end differentiable training
-        - Cross-modal attention mechanisms (6 attention layers)
-        - Modality importance gates (learned weights)
-        - Unified prediction head
+        - Cross-modal attention (Multi-head attention with 4 heads)
+        - Residual connections for stable training
+        - Batch normalization and layer normalization
+        - Feature selection (top 60 features from ~102 candidates)
+        - Unified prediction head with residual blocks
+        - Target: Predicting "will give again in 2025"
         """)
         
         st.markdown("---")
         
         st.markdown("#### Feature Engineering")
         st.markdown("""
-        **50+ Engineered Features**:
-        - **RFM Analysis**: Recency, Frequency, Monetary scores
-        - **Network Features**: PageRank, centrality measures
-        - **Temporal Patterns**: Giving trends, seasonality
-        - **Engagement Metrics**: Event attendance, campaign interactions
-        - **Statistical Aggregations**: Mean, median, std dev of giving patterns
-        - **Text Embeddings**: BERT-encoded contact reports (768-dim)
-        - **Graph Structure**: Relationship networks and family connections
+        **60 Selected Features** (from ~102 engineered features):
+        - **RFM Analysis**: Recency, Frequency, Monetary scores (15 features)
+        - **Recency & Engagement**: Days since last gift, consecutive years, gift frequency (10 features)
+        - **Temporal Patterns**: Giving trends, seasonality, time-weighted giving
+        - **Network Features**: Network size, PageRank, degree centrality, influence scores (5 features)
+        - **Capacity Features**: Rating tier, industry, region, age
+        - **Strategic Features**: High-value donor indicators, engagement metrics
+        - **Influence Features**: Professional indicators, giving influence scores
+        - **Text Features**: Contact report aggregates (number of reports, average text length, recent contacts in 90 days) compressed via SVD to 32 dimensions
+        - **Sequence Features**: Last 12 gift amounts per donor (processed by LSTM)
+        
+        **Feature Selection**: Top 60 features selected via mutual information to optimize training speed while maintaining 95%+ performance.
+        
+        **⚠️ Text Processing Limitation**: 
+        The model currently uses only aggregate statistics from contact reports (count, length, recency). The actual text content, sentiment, topics, and outcome categories (positive/negative/unresponsive) are not extracted. This represents a significant opportunity for improvement, as contact reports contain valuable semantic information that could enhance prediction accuracy.
         """)
+        
+        st.markdown("---")
+        
+        st.markdown("#### 🚀 Future Enhancement Opportunities")
+        st.markdown("""
+        **Text Processing Improvements**:
+        
+        The current model uses contact reports minimally (only metadata). The following enhancements could significantly improve prediction accuracy:
+        
+        **1. Sentiment Analysis**:
+        - Extract positive/negative/unresponsive outcomes from contact report text
+        - Use keyword-based sentiment (regex patterns for "expressed interest", "declined", "unresponsive")
+        - Create binary features: `has_positive_outcome`, `has_negative_outcome`, `has_unresponsive_outcome`
+        - Calculate sentiment scores per donor (ratio of positive to negative contacts)
+        
+        **2. Topic Extraction**:
+        - Identify discussion topics from contact reports (scholarship support, capital campaign, planned giving, etc.)
+        - Create topic frequency features per donor
+        - Use topic modeling (LDA, NMF) or keyword matching
+        - Track which topics correlate with future giving
+        
+        **3. Text Embeddings** (Lightweight Approaches):
+        - **TF-IDF + SVD**: Extract term frequency features, compress via SVD (faster than BERT)
+        - **Sentence Transformers**: Use lightweight models (all-MiniLM-L6-v2, ~384-dim) instead of full BERT
+        - **Word2Vec/FastText**: Pre-trained embeddings for domain-specific terms
+        - **Character-level embeddings**: For handling typos and variations
+        
+        **4. Structured Information Extraction**:
+        - Parse outcome categories already present in synthetic data
+        - Extract contact types (Meeting, Phone Call, Email, Event)
+        - Track contact frequency patterns (bursts vs. steady engagement)
+        - Identify relationship quality indicators from text patterns
+        
+        **5. Temporal Text Features**:
+        - Sentiment trends over time (improving vs. declining)
+        - Topic evolution (changing interests)
+        - Engagement velocity (increasing/decreasing contact frequency)
+        - Time-weighted sentiment (recent sentiment weighted more heavily)
+        """)
+    
+    # Credits/Attribution section at the bottom
+    st.markdown("---")
+    st.markdown("""
+    <div style="text-align: center; padding: 30px 0; color: #666; font-size: 14px;">
+        <p style="margin: 10px 0;"><strong>Created by</strong></p>
+        <p style="margin: 10px 0;">Danielle Brown</p>
+        <p style="margin: 10px 0;">Loyola Marymount University</p>
+        <p style="margin: 10px 0;">M.S. in Computer Science Senior Capstone Project</p>
+        <p style="margin: 10px 0;">2025</p>
+    </div>
+    """, unsafe_allow_html=True)
 

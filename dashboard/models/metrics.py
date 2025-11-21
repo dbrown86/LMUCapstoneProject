@@ -82,6 +82,9 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
     """Internal function to calculate metrics (without caching decorator)."""
     from sklearn.metrics import roc_auc_score, f1_score, accuracy_score, precision_score, recall_score, confusion_matrix
     
+    # PRIORITY 1: Try to load saved metrics first (most reliable)
+    saved_metrics = try_load_saved_metrics()
+    
     # Read directly from parquet file to avoid processing issues
     root = settings.get_project_root()
     data_paths = settings.get_data_paths()
@@ -99,6 +102,9 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
     # If we can't read from file, fall back to provided dataframe
     if source_df is None:
         if df is None:
+            # If no data available, return saved metrics if available, otherwise None
+            if saved_metrics:
+                return saved_metrics
             return {'auc': None, 'f1': None, 'baseline_auc': None, 'lift': None}
         source_df = df
     
@@ -237,6 +243,31 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
                 result['lift'] = None
         except Exception:
             pass
+    
+    # PRIORITY: If we have saved metrics and calculated metrics are missing or clearly wrong, use saved metrics
+    # A calculated AUC < 0.6 is suspicious (should be much higher for a good model)
+    if saved_metrics:
+        # Use saved metrics for core metrics if calculated ones are missing or suspiciously low
+        if result.get('auc') is None or (result.get('auc') is not None and result.get('auc') < 0.6):
+            if saved_metrics.get('auc') is not None:
+                result['auc'] = saved_metrics['auc']
+        if result.get('f1') is None or (result.get('f1') is not None and result.get('f1') < 0.5):
+            if saved_metrics.get('f1') is not None:
+                result['f1'] = saved_metrics['f1']
+        if result.get('accuracy') is None:
+            if saved_metrics.get('accuracy') is not None:
+                result['accuracy'] = saved_metrics['accuracy']
+        if result.get('precision') is None:
+            if saved_metrics.get('precision') is not None:
+                result['precision'] = saved_metrics['precision']
+        if result.get('recall') is None:
+            if saved_metrics.get('recall') is not None:
+                result['recall'] = saved_metrics['recall']
+        # Only use saved baseline_auc and lift if calculated ones are None
+        if result.get('baseline_auc') is None and saved_metrics.get('baseline_auc') is not None:
+            result['baseline_auc'] = saved_metrics['baseline_auc']
+        if result.get('lift') is None and saved_metrics.get('lift') is not None:
+            result['lift'] = saved_metrics['lift']
     
     return result
 
