@@ -96,8 +96,10 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
             pass  # chmod not available on Windows or file system doesn't support it
     
     # Set User-Agent for Kaggle API (required by some versions)
-    if not os.getenv("KAGGLE_USER_AGENT"):
-        os.environ["KAGGLE_USER_AGENT"] = "streamlit-dashboard/1.0"
+    # Pass environment variables explicitly to subprocess
+    env = os.environ.copy()
+    if "KAGGLE_USER_AGENT" not in env:
+        env["KAGGLE_USER_AGENT"] = "streamlit-dashboard/1.0"
     
     cmd = [
         kaggle_cli,
@@ -113,7 +115,7 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     try:
         if STREAMLIT_AVAILABLE:
             st.sidebar.info(f"📥 Downloading dataset from Kaggle: {KAGGLE_DATASET}")
-        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600)
+        result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600, env=env)
         if STREAMLIT_AVAILABLE:
             st.sidebar.success("✅ Kaggle dataset downloaded successfully")
         return KAGGLE_DOWNLOAD_DIR
