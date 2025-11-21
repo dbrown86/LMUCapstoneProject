@@ -185,6 +185,8 @@ def render(df: pd.DataFrame = None):
             </div>
             """, unsafe_allow_html=True)
         
+        st.markdown("")  # Line space before Distribution Summary
+        
         st.markdown("""
         <div style="font-family: inherit; font-size: inherit;">
         <strong>Distribution Summary:</strong><br>
