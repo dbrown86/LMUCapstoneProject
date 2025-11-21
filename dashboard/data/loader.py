@@ -126,14 +126,10 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
             pass  # chmod not available on Windows or file system doesn't support it
     
     # Set User-Agent for Kaggle API (required by some versions)
-    # Pass environment variables explicitly to subprocess
-    env = os.environ.copy()
+    # CRITICAL: Set in both os.environ AND the env dict passed to subprocess
+    # The Kaggle CLI may read from either location
     
-    # Always explicitly set a valid User-Agent string (never None)
-    # Remove any existing KAGGLE_USER_AGENT first to avoid conflicts
-    env.pop("KAGGLE_USER_AGENT", None)  # Remove if exists (handles string "None" case)
-    
-    # Check if there's a valid value in Streamlit secrets
+    # Determine the User-Agent value
     user_agent_value = "streamlit-dashboard/1.0"  # Default
     if STREAMLIT_AVAILABLE:
         try:
@@ -144,8 +140,33 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
         except Exception:
             pass  # Use default if secrets access fails
     
-    # Always set a valid non-empty string
-    env["KAGGLE_USER_AGENT"] = str(user_agent_value).strip() or "streamlit-dashboard/1.0"
+    # Ensure it's always a valid non-empty string
+    user_agent_value = str(user_agent_value).strip() or "streamlit-dashboard/1.0"
+    
+    # Set in the actual environment (for any code that reads os.environ directly)
+    # CRITICAL: Remove any existing value first (in case it's the string "None")
+    if "KAGGLE_USER_AGENT" in os.environ:
+        del os.environ["KAGGLE_USER_AGENT"]
+    os.environ["KAGGLE_USER_AGENT"] = user_agent_value
+    
+    # Also set in the env dict passed to subprocess
+    env = os.environ.copy()
+    # Double-check: ensure it's set and not None
+    if "KAGGLE_USER_AGENT" not in env or not env["KAGGLE_USER_AGENT"] or env["KAGGLE_USER_AGENT"] == "None":
+        env["KAGGLE_USER_AGENT"] = user_agent_value
+    
+    # Final safety check: if somehow it's still invalid, remove it entirely
+    # Some versions of Kaggle CLI work without User-Agent
+    if env.get("KAGGLE_USER_AGENT") in (None, "None", ""):
+        # Remove it entirely rather than setting to None
+        env.pop("KAGGLE_USER_AGENT", None)
+        if "KAGGLE_USER_AGENT" in os.environ:
+            del os.environ["KAGGLE_USER_AGENT"]
+    else:
+        # Ensure it's a valid string
+        env["KAGGLE_USER_AGENT"] = str(env["KAGGLE_USER_AGENT"]).strip()
+        if not env["KAGGLE_USER_AGENT"]:
+            env.pop("KAGGLE_USER_AGENT", None)
     
     # Build command with dataset name from secrets
     cmd = [
