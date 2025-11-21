@@ -17,18 +17,20 @@ except ImportError:
 # Import modules
 try:
     from dashboard.models.metrics import try_load_saved_metrics
+    from dashboard.data.query_loader import QueryBasedLoader
 except ImportError:
     # Fallbacks for testing
     def try_load_saved_metrics():
         return None
+    QueryBasedLoader = None
 
 
-def render(df: pd.DataFrame, prob_threshold: float = 0.5):
+def render(df, prob_threshold: float = 0.5):
     """
     Render the take action page.
     
     Args:
-        df: Dataframe with donor data and predictions
+        df: Dataframe or QueryBasedLoader with donor data and predictions
         prob_threshold: Probability threshold for high-probability donors
     """
     if not STREAMLIT_AVAILABLE:
@@ -37,19 +39,43 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
     st.markdown('<p class="page-title">⚡ Take Action</p>', unsafe_allow_html=True)
     st.markdown('<p class="page-subtitle">Prioritized outreach recommendations and next steps</p>', unsafe_allow_html=True)
     
-    # CRITICAL: Use 2025 prediction column - prioritize Will_Give_Again_Probability
-    prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
-    
-    if prob_col not in df.columns:
-        st.error("Prediction data not available. Please ensure the model has been trained.")
-        return
-    
-    saved_meta = try_load_saved_metrics() or {}
-    threshold = saved_meta.get('optimal_threshold', prob_threshold)
-    
-    # Categorize opportunities
-    high_prob = df[df[prob_col] >= 0.7].copy()
-    medium_prob = df[(df[prob_col] >= 0.4) & (df[prob_col] < 0.7)].copy()
+    # Handle QueryBasedLoader - convert to DataFrame for this page (we need specific filtered data)
+    if QueryBasedLoader is not None and isinstance(df, QueryBasedLoader):
+        # Use query methods to get only the data we need
+        prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
+        
+        if prob_col not in df.columns:
+            st.error("Prediction data not available. Please ensure the model has been trained.")
+            return
+        
+        saved_meta = try_load_saved_metrics() or {}
+        threshold = saved_meta.get('optimal_threshold', prob_threshold)
+        
+        # Query for high probability donors (>= 0.7)
+        high_prob = df.query(
+            where=f'"{prob_col}" >= 0.7',
+            order_by=f'"{prob_col}" DESC'
+        )
+        
+        # Query for medium probability donors (0.4-0.7)
+        medium_prob = df.query(
+            where=f'"{prob_col}" >= 0.4 AND "{prob_col}" < 0.7',
+            order_by=f'"{prob_col}" DESC'
+        )
+    else:
+        # Traditional DataFrame operations
+        prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
+        
+        if prob_col not in df.columns:
+            st.error("Prediction data not available. Please ensure the model has been trained.")
+            return
+        
+        saved_meta = try_load_saved_metrics() or {}
+        threshold = saved_meta.get('optimal_threshold', prob_threshold)
+        
+        # Categorize opportunities
+        high_prob = df[df[prob_col] >= 0.7].copy()
+        medium_prob = df[(df[prob_col] >= 0.4) & (df[prob_col] < 0.7)].copy()
     
     # Helper to ensure unique column names (avoid Arrow duplicate-name crash)
     def _ensure_unique_columns(df_in: pd.DataFrame) -> pd.DataFrame:
@@ -67,15 +93,46 @@ def render(df: pd.DataFrame, prob_threshold: float = 0.5):
         return df_in
 
     # Quick Wins: High probability recent donors
-    if 'segment' in df.columns:
-        quick_wins = high_prob[high_prob['segment'] == 'Recent (0-6mo)'].nlargest(50, prob_col) if len(high_prob) > 0 else pd.DataFrame()
-        cultivation = medium_prob.nlargest(100, prob_col) if len(medium_prob) > 0 else pd.DataFrame()
-        
-        # Re-engagement: Lapsed but high predicted probability
-        re_engagement = df[
-            (df[prob_col] >= 0.6) & 
-            (df['segment'].isin(['Lapsed (1-2yr)', 'Very Lapsed (2yr+)']))
-        ].nlargest(50, prob_col) if 'segment' in df.columns else pd.DataFrame()
+    # Check if segment column exists (works for both DataFrame and QueryBasedLoader)
+    has_segment = False
+    if hasattr(df, 'columns'):
+        if isinstance(df.columns, (list, pd.Index)):
+            has_segment = 'segment' in df.columns
+        else:
+            has_segment = 'segment' in list(df.columns)
+    elif hasattr(df, '__contains__'):
+        has_segment = 'segment' in df
+    
+    if has_segment:
+        if QueryBasedLoader is not None and isinstance(df, QueryBasedLoader):
+            # Use query methods
+            quick_wins = df.query(
+                where=f'"{prob_col}" >= 0.7 AND "segment" = \'Recent (0-6mo)\'',
+                order_by=f'"{prob_col}" DESC',
+                limit=50
+            )
+            cultivation = df.query(
+                where=f'"{prob_col}" >= 0.4 AND "{prob_col}" < 0.7',
+                order_by=f'"{prob_col}" DESC',
+                limit=100
+            )
+            re_engagement = df.query(
+                where=f'"{prob_col}" >= 0.6 AND "segment" IN (\'Lapsed (1-2yr)\', \'Very Lapsed (2yr+)\')',
+                order_by=f'"{prob_col}" DESC',
+                limit=50
+            )
+        else:
+            # Traditional DataFrame operations
+            quick_wins = high_prob[high_prob['segment'] == 'Recent (0-6mo)'].nlargest(50, prob_col) if len(high_prob) > 0 else pd.DataFrame()
+            cultivation = medium_prob.nlargest(100, prob_col) if len(medium_prob) > 0 else pd.DataFrame()
+            re_engagement = df[
+                (df[prob_col] >= 0.6) & 
+                (df['segment'].isin(['Lapsed (1-2yr)', 'Very Lapsed (2yr+)']))
+            ].nlargest(50, prob_col) if 'segment' in df.columns else pd.DataFrame()
+    else:
+        quick_wins = pd.DataFrame()
+        cultivation = pd.DataFrame()
+        re_engagement = pd.DataFrame()
         
         # Display Quick Wins
         st.markdown("### 🎯 Quick Wins - High Probability Recent Donors")

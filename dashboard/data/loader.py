@@ -142,9 +142,21 @@ def load_full_dataset(use_cache: bool = True):
         use_cache: If True and Streamlit is available, use Streamlit caching
     
     Returns:
-        pd.DataFrame: Processed donor dataset
+        pd.DataFrame or QueryBasedLoader: Processed donor dataset or query-based loader
     """
-    # Use Streamlit caching if available and requested - optimized for performance
+    # Check if query-based loading is enabled (prevents OOM)
+    use_query_loader = os.getenv("STREAMLIT_USE_QUERY_LOADER", "true").lower() == "true"
+    
+    if use_query_loader:
+        # Try to get query-based loader (only loads data on-demand)
+        from dashboard.data.query_loader import get_query_loader
+        query_loader = get_query_loader()
+        if query_loader is not None:
+            if STREAMLIT_AVAILABLE:
+                st.sidebar.success(f"✅ Using query-based loader (full {len(query_loader):,} rows available on-demand)")
+            return query_loader
+    
+    # Fallback to traditional loading (loads full dataset into memory)
     if use_cache and STREAMLIT_AVAILABLE:
         @st.cache_data(show_spinner=False, ttl=7200, max_entries=1)  # 2 hour cache, no spinner, single entry
         def _load_cached():

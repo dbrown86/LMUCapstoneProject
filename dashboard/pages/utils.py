@@ -14,13 +14,20 @@ except ImportError:
     STREAMLIT_AVAILABLE = False
     st = None
 
+# Import QueryBasedLoader for type checking
+try:
+    from dashboard.data.query_loader import QueryBasedLoader
+except ImportError:
+    QueryBasedLoader = None
 
-def filter_dataframe(df: pd.DataFrame, regions: list, donor_types: list, segments: list, use_cache: bool = True) -> pd.DataFrame:
+
+def filter_dataframe(df, regions: list, donor_types: list, segments: list, use_cache: bool = True):
     """
     Filter dataframe by regions, donor_types, and segments (cached for performance).
+    Works with both pd.DataFrame and QueryBasedLoader.
     
     Args:
-        df: Dataframe to filter
+        df: Dataframe or QueryBasedLoader to filter
         regions: List of regions to include
         donor_types: List of donor types to include
         segments: List of segments to include
@@ -29,6 +36,26 @@ def filter_dataframe(df: pd.DataFrame, regions: list, donor_types: list, segment
     Returns:
         pd.DataFrame: Filtered dataframe
     """
+    # Check if df is a QueryBasedLoader
+    if QueryBasedLoader is not None and isinstance(df, QueryBasedLoader):
+        # Use query-based filtering (more memory efficient)
+        if use_cache and STREAMLIT_AVAILABLE:
+            @st.cache_data(ttl=3600, show_spinner=False, max_entries=50)
+            def _filter_cached(regions_tuple, donor_types_tuple, segments_tuple):
+                return df.filter(
+                    list(regions_tuple) if regions_tuple else None,
+                    list(donor_types_tuple) if donor_types_tuple else None,
+                    list(segments_tuple) if segments_tuple else None
+                )
+            return _filter_cached(
+                tuple(regions) if regions else (),
+                tuple(donor_types) if donor_types else (),
+                tuple(segments) if segments else ()
+            )
+        else:
+            return df.filter(regions, donor_types, segments)
+    
+    # Traditional DataFrame filtering
     if use_cache and STREAMLIT_AVAILABLE:
         @st.cache_data(ttl=3600, show_spinner=False, max_entries=50)  # Cache for 1 hour, up to 50 filter combinations
         def _filter_cached(df_hash, regions_tuple, donor_types_tuple, segments_tuple):
@@ -53,17 +80,80 @@ def _filter_dataframe_internal(df: pd.DataFrame, regions: list, donor_types: lis
     return df_filtered
 
 
-def get_segment_stats(df: pd.DataFrame, use_cache: bool = True) -> pd.DataFrame:
+def get_segment_stats(df, use_cache: bool = True) -> pd.DataFrame:
     """
     Get statistics by segment (cached for performance).
+    Works with both pd.DataFrame and QueryBasedLoader.
     
     Args:
-        df: Dataframe with segment column
+        df: Dataframe or QueryBasedLoader with segment column
         use_cache: If True and Streamlit is available, use Streamlit caching
     
     Returns:
         pd.DataFrame: Statistics by segment
     """
+    # Check if df is a QueryBasedLoader
+    if QueryBasedLoader is not None and isinstance(df, QueryBasedLoader):
+        # Use query-based aggregation (more memory efficient)
+        if use_cache and STREAMLIT_AVAILABLE:
+            @st.cache_data(ttl=3600, show_spinner=False)
+            def _get_cached():
+                return df.get_aggregate(
+                    group_by='segment',
+                    aggregations={
+                        'donor_id': 'COUNT',
+                        'predicted_prob': 'AVG',
+                        'total_giving': 'SUM',
+                        'avg_gift': 'AVG'
+                    }
+                )
+            result = _get_cached()
+            # Rename columns to match expected format
+            if not result.empty:
+                result = result.rename(columns={
+                    'donor_id_count': 'donor_id',
+                    'predicted_prob_avg': 'predicted_prob',
+                    'total_giving_sum': 'total_giving',
+                    'avg_gift_avg': 'avg_gift'
+                })
+                # Calculate estimated revenue
+                if 'predicted_prob' in result.columns and 'avg_gift' in result.columns:
+                    result['estimated_revenue'] = (
+                        result['donor_id'].astype(float) *
+                        result['predicted_prob'].astype(float) *
+                        result['avg_gift'].astype(float)
+                    )
+                else:
+                    result['estimated_revenue'] = 0.0
+            return result
+        else:
+            result = df.get_aggregate(
+                group_by='segment',
+                aggregations={
+                    'donor_id': 'COUNT',
+                    'predicted_prob': 'AVG',
+                    'total_giving': 'SUM',
+                    'avg_gift': 'AVG'
+                }
+            )
+            if not result.empty:
+                result = result.rename(columns={
+                    'donor_id_count': 'donor_id',
+                    'predicted_prob_avg': 'predicted_prob',
+                    'total_giving_sum': 'total_giving',
+                    'avg_gift_avg': 'avg_gift'
+                })
+                if 'predicted_prob' in result.columns and 'avg_gift' in result.columns:
+                    result['estimated_revenue'] = (
+                        result['donor_id'].astype(float) *
+                        result['predicted_prob'].astype(float) *
+                        result['avg_gift'].astype(float)
+                    )
+                else:
+                    result['estimated_revenue'] = 0.0
+            return result
+    
+    # Traditional DataFrame aggregation
     if use_cache and STREAMLIT_AVAILABLE:
         @st.cache_data(ttl=3600, show_spinner=False)
         def _get_cached(df_hash):
