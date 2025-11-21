@@ -11,7 +11,7 @@ import subprocess
 import shutil
 import json
 from pathlib import Path
-from typing import Optional
+from typing import Optional, List
 
 # Import config for paths
 from dashboard.config import settings
