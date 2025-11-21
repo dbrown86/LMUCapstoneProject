@@ -125,21 +125,6 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
         except (OSError, AttributeError):
             pass  # chmod not available on Windows or file system doesn't support it
     
-    # Pass environment variables to subprocess
-    # CRITICAL: Remove KAGGLE_USER_AGENT completely - it's causing None errors
-    # Remove from os.environ first (before copying)
-    if "KAGGLE_USER_AGENT" in os.environ:
-        del os.environ["KAGGLE_USER_AGENT"]
-    
-    # Create clean environment dict - explicitly exclude KAGGLE_USER_AGENT
-    env = {}
-    # Copy all environment variables EXCEPT KAGGLE_USER_AGENT
-    for key, value in os.environ.items():
-        if key != "KAGGLE_USER_AGENT":
-            # Only add valid string values (filter out None)
-            if value is not None and isinstance(value, str):
-                env[key] = value
-    
     # Build command with dataset name from secrets
     cmd = [
         kaggle_cli,
@@ -159,6 +144,13 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
             except Exception:
                 pass  # Even sidebar messages can fail
         try:
+            # Create clean environment dict for subprocess
+            # Don't modify os.environ - just create a clean dict for subprocess
+            # Explicitly exclude KAGGLE_USER_AGENT to prevent None errors
+            # Only include valid string values (filter out None and non-strings)
+            env = {k: v for k, v in os.environ.items() 
+                   if k != "KAGGLE_USER_AGENT" and v is not None and isinstance(v, str)}
+            
             result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600, env=env)
             if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
                 try:
