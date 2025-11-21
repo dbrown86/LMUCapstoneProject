@@ -119,8 +119,18 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
         return None
     except subprocess.CalledProcessError as err:
         # Capture both stdout and stderr for better error messages
-        stdout_msg = err.stdout.decode("utf-8", errors="ignore") if err.stdout else ""
-        stderr_msg = err.stderr.decode("utf-8", errors="ignore") if err.stderr else ""
+        # Handle both string and bytes (depending on subprocess configuration)
+        def safe_decode(value):
+            if value is None:
+                return ""
+            if isinstance(value, str):
+                return value
+            if isinstance(value, bytes):
+                return value.decode("utf-8", errors="ignore")
+            return str(value)
+        
+        stdout_msg = safe_decode(err.stdout) if err.stdout else ""
+        stderr_msg = safe_decode(err.stderr) if err.stderr else ""
         error_msg = f"{stderr_msg}\n{stdout_msg}".strip() if stderr_msg or stdout_msg else str(err)
         
         if STREAMLIT_AVAILABLE:
