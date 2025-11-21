@@ -472,7 +472,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
                                 ),
                                 text=f"{row['Count']:,} ({row['Percentage']:.1f}%)",
                                 textposition='outside',
-                                textfont=dict(size=12, color='white', weight='bold'),
+                                textfont=dict(size=10, color='white', weight='bold'),
                                 hovertemplate=(
                                     f"<b>{row['segment']}</b><br>" +
                                     f"Count: {row['Count']:,}<br>" +
@@ -802,7 +802,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
                         ),
                         text=[f"{score:.1f}" for score in officer_stats['Quality_Score']],
                         textposition='outside',
-                        textfont=dict(size=13, color='white'),
+                        textfont=dict(size=10, color='white'),
                         hovertemplate=(
                             "<b>%{customdata[0]}</b><br>" +
                             "Quality Score: %{x:.1f}/100<br>" +
