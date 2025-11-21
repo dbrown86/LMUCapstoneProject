@@ -35,6 +35,15 @@ class QueryBasedLoader:
         if not self.db_path.exists():
             raise FileNotFoundError(f"Database not found: {db_path}")
         
+        # Verify database is valid and has the donors table
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='donors'")
+            if cursor.fetchone() is None:
+                raise ValueError(f"Table 'donors' does not exist in database {db_path}")
+        finally:
+            conn.close()
+        
         # Cache for column names and metadata
         self._columns_cache = None
         self._row_count_cache = None
@@ -162,6 +171,11 @@ class QueryBasedLoader:
         if self._row_count_cache is None:
             conn = self._get_connection()
             try:
+                # Check if table exists first
+                cursor = conn.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='donors'")
+                if cursor.fetchone() is None:
+                    raise ValueError(f"Table 'donors' does not exist in database {self.db_path}")
+                
                 cursor = conn.execute("SELECT COUNT(*) FROM donors")
                 self._row_count_cache = cursor.fetchone()[0]
             finally:

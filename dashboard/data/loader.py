@@ -160,11 +160,21 @@ def load_full_dataset(use_cache: bool = True):
     if use_query_loader:
         # Try to get query-based loader (only loads data on-demand)
         from dashboard.data.query_loader import get_query_loader
-        query_loader = get_query_loader()
-        if query_loader is not None:
+        try:
+            query_loader = get_query_loader()
+            if query_loader is not None:
+                # Test that the loader works by checking row count
+                try:
+                    row_count = len(query_loader)
+                    if STREAMLIT_AVAILABLE:
+                        st.sidebar.success(f"✅ Using query-based loader (full {row_count:,} rows available on-demand)")
+                    return query_loader
+                except Exception as e:
+                    if STREAMLIT_AVAILABLE:
+                        st.sidebar.warning(f"Query loader found but not usable: {e}. Falling back to traditional loading.")
+        except Exception as e:
             if STREAMLIT_AVAILABLE:
-                st.sidebar.success(f"✅ Using query-based loader (full {len(query_loader):,} rows available on-demand)")
-            return query_loader
+                st.sidebar.info(f"Query-based loading not available: {e}. Using traditional loading.")
     
     # Fallback to traditional loading (loads full dataset into memory)
     if use_cache and STREAMLIT_AVAILABLE:
