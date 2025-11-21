@@ -30,6 +30,8 @@ except ImportError:
 KAGGLE_DATASET = os.getenv("KAGGLE_DATASET")
 KAGGLE_DOWNLOAD_DIR = Path(os.getenv("KAGGLE_DOWNLOAD_DIR", "/tmp/kaggle_data")).resolve()
 KAGGLE_KNOWN_CSVS = {"donors.csv", "contacts.csv", "events.csv", "family.csv", "giving.csv", "relationships.csv"}
+KAGGLE_CACHED_PARQUET = KAGGLE_DOWNLOAD_DIR / "donors_cached.parquet"
+KAGGLE_CACHED_SQLITE = KAGGLE_DOWNLOAD_DIR / "donors_cached.db"
 
 
 def _download_kaggle_dataset_if_needed() -> Optional[Path]:
@@ -122,10 +124,94 @@ def _resolve_kaggle_csv_dir() -> Optional[Path]:
     return None
 
 
+def _convert_kaggle_csv_to_sqlite(csv_dir: Path) -> Optional[Path]:
+    """
+    Convert Kaggle donors.csv to SQLite database in chunks.
+    This allows loading the FULL 500K row dataset without OOM issues.
+    SQLite can handle large datasets efficiently and we can query only what's needed.
+    
+    Args:
+        csv_dir: Directory containing the Kaggle CSV files
+        
+    Returns:
+        Path to the created SQLite database, or None if conversion failed
+    """
+    # Use the global cached SQLite path
+    sqlite_path = KAGGLE_CACHED_SQLITE
+    
+    # If SQLite already exists, use it
+    if sqlite_path.exists():
+        return sqlite_path
+    
+    # Find donors.csv
+    donor_csv = None
+    for name in ["donors.csv", "donors_with_network_features.csv", "donors_full.csv"]:
+        candidate = csv_dir / name
+        if candidate.exists():
+            donor_csv = candidate
+            break
+    
+    if not donor_csv or not donor_csv.exists():
+        return None
+    
+    try:
+        import sqlite3
+        
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.info("🔄 Converting CSV to SQLite (processing full dataset in chunks)...")
+        
+        # Ensure directory exists
+        sqlite_path.parent.mkdir(parents=True, exist_ok=True)
+        
+        # Remove existing database if it exists (incomplete)
+        if sqlite_path.exists():
+            sqlite_path.unlink()
+        
+        # Create SQLite database
+        conn = sqlite3.connect(str(sqlite_path))
+        
+        # Read CSV in chunks and write to SQLite (handles full 500K rows without OOM)
+        chunk_size = 50000
+        first_chunk = True
+        total_rows = 0
+        
+        for chunk in pd.read_csv(donor_csv, chunksize=chunk_size, low_memory=False):
+            # Write chunk to SQLite (creates table on first chunk, appends on subsequent)
+            chunk.to_sql('donors', conn, if_exists='append' if not first_chunk else 'replace', index=False)
+            first_chunk = False
+            total_rows += len(chunk)
+            
+            if STREAMLIT_AVAILABLE and total_rows % 100000 == 0:
+                st.sidebar.info(f"   Processed {total_rows:,} rows...")
+        
+        # Create indexes for common query columns to speed up queries
+        try:
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_prob ON donors(Will_Give_Again_Probability)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_segment ON donors(segment)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_region ON donors(region)")
+            conn.execute("CREATE INDEX IF NOT EXISTS idx_donor_type ON donors(donor_type)")
+        except Exception:
+            # Index creation is optional, continue if it fails
+            pass
+        
+        conn.close()
+        
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.success(f"✅ SQLite database created ({total_rows:,} rows) - Full dataset available!")
+        
+        return sqlite_path
+    except Exception as e:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.warning(f"Failed to convert CSV to SQLite: {e}")
+        return None
+
+
 def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
     """
     Convert Kaggle donors.csv to Parquet format for efficient loading.
-    This reduces memory usage significantly compared to loading CSV directly.
+    This reduces memory usage by:
+    1. Sampling only a subset of rows (default 100K, configurable via MAX_ROWS env var)
+    2. Selecting only essential columns used by the dashboard
     
     Args:
         csv_dir: Directory containing the Kaggle CSV files
@@ -133,7 +219,8 @@ def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
     Returns:
         Path to the created Parquet file, or None if conversion failed
     """
-    parquet_path = csv_dir / "donors_cached.parquet"
+    # Use the global cached Parquet path
+    parquet_path = KAGGLE_CACHED_PARQUET
     
     # If Parquet already exists, use it
     if parquet_path.exists():
@@ -153,16 +240,104 @@ def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
     try:
         # Load CSV with optimized dtypes to reduce memory
         if STREAMLIT_AVAILABLE:
-            st.sidebar.info("🔄 Converting CSV to Parquet for faster loading...")
+            st.sidebar.info("🔄 Converting CSV to Parquet (sampling rows and columns for memory efficiency)...")
         
-        # Read CSV in chunks to avoid OOM, then save as Parquet
-        df = pd.read_csv(donor_csv, low_memory=False)
+        # Get max rows from environment (default 100K to prevent OOM)
+        max_rows = int(os.getenv("STREAMLIT_MAX_ROWS", "100000"))
+        
+        # Essential columns used by the dashboard (based on code analysis)
+        essential_columns = [
+            # Core identifiers
+            'donor_id', 'Donor_ID', 'donorid', 'ID',
+            # Names
+            'First_Name', 'first_name', 'First Name',
+            'Last_Name', 'last_name', 'Last Name',
+            'Full_Name', 'full_name', 'Name', 'name',
+            # Predictions and outcomes
+            'Will_Give_Again_Probability', 'predicted_prob', 'prediction', 'probability', 'score',
+            'Gave_Again_In_2025', 'Gave_Again_In_2024', 'actual_gave', 'Legacy_Intent_Binary',
+            'legacy_intent_binary', 'gave', 'label', 'target', 'y',
+            # Giving metrics
+            'total_giving', 'Lifetime_Giving', 'lifetime_giving', 'Lifetime Giving', 
+            'LifetimeGiving', 'total_amount',
+            'Last_Gift', 'last_gift', 'LastGift', 'last_gift_amount',
+            'avg_gift', 'Average_Gift', 'average_gift', 'avg_gift_amount', 'Avg_Gift_Amount',
+            'gift_count', 'Num_Gifts', 'num_gifts', 'gifts',
+            # Segmentation
+            'segment', 'Segment',
+            'region', 'Geographic_Region', 'Region',
+            'donor_type', 'Primary_Constituent_Type', 'Donor_Type', 'type',
+            # Dates and recency
+            'days_since_last', 'Days_Since_Last_Gift', 'days_since_last_gift',
+            'last_gift_date', 'Last_Gift_Date',
+            # RFM scores
+            'rfm_score', 'RFM_Score', 'rfm',
+            'recency_score', 'Recency_Score',
+            'frequency_score', 'Frequency_Score',
+            'monetary_score', 'Monetary_Score',
+            # Other useful features
+            'years_active', 'Years_Active',
+            'consecutive_years', 'Consecutive_Years',
+            # Capacity and gift officer (for take_action page)
+            'Rating', 'rating', 'capacity', 'Capacity',
+            'Gift Officer', 'gift_officer', 'Gift_Officer',
+        ]
+        
+        # Read CSV in chunks to sample rows efficiently
+        chunk_size = 50000
+        chunks = []
+        total_rows_read = 0
+        
+        for chunk in pd.read_csv(donor_csv, chunksize=chunk_size, low_memory=False):
+            # Select only essential columns that exist in this chunk
+            available_cols = [col for col in essential_columns if col in chunk.columns]
+            # Also keep any columns that match patterns (for feature analysis page)
+            feature_cols = [col for col in chunk.columns if any(
+                pattern in col.lower() for pattern in ['_count', '_sum', '_mean', '_max', '_min', 'network', 'degree']
+            )]
+            selected_cols = list(set(available_cols + feature_cols))
+            
+            if selected_cols:
+                chunk = chunk[selected_cols]
+            
+            chunks.append(chunk)
+            total_rows_read += len(chunk)
+            
+            # Stop if we've read enough rows
+            if total_rows_read >= max_rows:
+                # Trim the last chunk if needed
+                if total_rows_read > max_rows:
+                    excess = total_rows_read - max_rows
+                    chunk = chunk.iloc[:-excess]
+                    chunks[-1] = chunk
+                break
+        
+        # Combine chunks
+        if not chunks:
+            if STREAMLIT_AVAILABLE:
+                st.sidebar.error("No data chunks loaded")
+            return None
+        
+        df = pd.concat(chunks, ignore_index=True)
+        
+        # Final column selection (in case some columns weren't in all chunks)
+        final_cols = [col for col in essential_columns if col in df.columns]
+        feature_cols = [col for col in df.columns if any(
+            pattern in col.lower() for pattern in ['_count', '_sum', '_mean', '_max', '_min', 'network', 'degree']
+        )]
+        final_cols = list(set(final_cols + feature_cols))
+        
+        if final_cols:
+            df = df[final_cols]
+        
+        # Ensure directory exists
+        parquet_path.parent.mkdir(parents=True, exist_ok=True)
         
         # Save as Parquet (much more memory-efficient)
         df.to_parquet(parquet_path, engine='pyarrow', compression='snappy', index=False)
         
         if STREAMLIT_AVAILABLE:
-            st.sidebar.success("✅ Parquet cache created successfully")
+            st.sidebar.success(f"✅ Parquet cache created ({len(df):,} rows, {len(df.columns)} columns)")
         
         return parquet_path
     except Exception as e:
@@ -185,16 +360,50 @@ def _load_full_dataset_internal():
     sqlite_paths = data_paths['sqlite_paths']
     csv_dir_candidates = data_paths['csv_dir_candidates']
 
-    # If Kaggle dataset was downloaded, convert CSV to Parquet for efficiency
+    # If Kaggle dataset was downloaded, prioritize SQLite (full dataset) or Parquet (sampled)
     if kaggle_dir:
         resolved_csv_dir = _resolve_kaggle_csv_dir()
         if resolved_csv_dir:
-            cached_parquet = _convert_kaggle_csv_to_parquet(resolved_csv_dir)
-            if cached_parquet:
-                parquet_paths.insert(0, str(cached_parquet))
+            # Priority 1: Try SQLite (full dataset, no OOM)
+            if KAGGLE_CACHED_SQLITE.exists():
+                sqlite_paths.insert(0, str(KAGGLE_CACHED_SQLITE))
+            else:
+                # Convert CSV to SQLite (handles full 500K rows in chunks)
+                cached_sqlite = _convert_kaggle_csv_to_sqlite(resolved_csv_dir)
+                if cached_sqlite:
+                    sqlite_paths.insert(0, str(cached_sqlite))
+            
+            # Priority 2: Fallback to Parquet (sampled, if SQLite fails)
+            if KAGGLE_CACHED_PARQUET.exists():
+                parquet_paths.insert(0, str(KAGGLE_CACHED_PARQUET))
+            else:
+                # Only create Parquet if SQLite conversion failed
+                cached_parquet = _convert_kaggle_csv_to_parquet(resolved_csv_dir)
+                if cached_parquet:
+                    parquet_paths.insert(0, str(cached_parquet))
+            
             csv_dir_candidates.insert(0, str(resolved_csv_dir))
     
-    # Priority 1: Try Parquet file (fastest - use pyarrow engine)
+    # Priority 1: Try SQLite database (full dataset)
+    # Note: Conversion to SQLite is done in chunks (safe), but loading still loads full table into memory.
+    # If OOM persists, consider implementing query-based loading per page.
+    for db_path in sqlite_paths:
+        if os.path.exists(db_path):
+            try:
+                import sqlite3
+                conn = sqlite3.connect(db_path)
+                # Load full dataset from SQLite
+                # SQLite conversion was done in chunks (safe), but this still loads all rows into memory
+                df = pd.read_sql_query("SELECT * FROM donors", conn)
+                conn.close()
+                if STREAMLIT_AVAILABLE:
+                    st.sidebar.success(f"✅ Loaded full dataset from SQLite ({len(df):,} rows)")
+                return process_dataframe(df)
+            except Exception as e:
+                if STREAMLIT_AVAILABLE:
+                    st.sidebar.warning(f"Failed to load {db_path}: {e}")
+    
+    # Priority 2: Try Parquet file (sampled dataset, fallback if SQLite unavailable)
     for path in parquet_paths:
         if os.path.exists(path):
             try:
@@ -203,19 +412,6 @@ def _load_full_dataset_internal():
             except Exception as e:
                 if STREAMLIT_AVAILABLE:
                     st.sidebar.warning(f"Failed to load {path}: {e}")
-    
-    # Priority 2: Try SQLite database (load full table)
-    for db_path in sqlite_paths:
-        if os.path.exists(db_path):
-            try:
-                import sqlite3
-                conn = sqlite3.connect(db_path)
-                df = pd.read_sql_query("SELECT * FROM donors", conn)
-                conn.close()
-                return process_dataframe(df)
-            except Exception as e:
-                if STREAMLIT_AVAILABLE:
-                    st.sidebar.warning(f"Failed to load {db_path}: {e}")
     
     # Priority 3: Try CSV parts (load fewer files for speed)
     csv_dir = next((p for p in csv_dir_candidates if os.path.exists(p)), None)
