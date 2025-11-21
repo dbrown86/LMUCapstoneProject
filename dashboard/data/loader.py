@@ -135,23 +135,37 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
             if isinstance(value, str):
                 return value
             if isinstance(value, bytes):
-                return value.decode("utf-8", errors="ignore")
+                try:
+                    return value.decode("utf-8", errors="ignore")
+                except (AttributeError, UnicodeDecodeError):
+                    return str(value)
             return str(value)
         
-        stdout_msg = safe_decode(err.stdout) if err.stdout else ""
-        stderr_msg = safe_decode(err.stderr) if err.stderr else ""
+        try:
+            stdout_msg = safe_decode(err.stdout) if err.stdout else ""
+        except Exception:
+            stdout_msg = str(err.stdout) if err.stdout else ""
+        
+        try:
+            stderr_msg = safe_decode(err.stderr) if err.stderr else ""
+        except Exception:
+            stderr_msg = str(err.stderr) if err.stderr else ""
+        
         error_msg = f"{stderr_msg}\n{stdout_msg}".strip() if stderr_msg or stdout_msg else str(err)
         
         if STREAMLIT_AVAILABLE:
-            st.sidebar.error(f"❌ Failed to download Kaggle dataset")
-            st.sidebar.error(f"Error details: {error_msg}")
-            # Provide helpful troubleshooting info
-            if "401" in error_msg or "Unauthorized" in error_msg:
-                st.sidebar.warning("💡 Check that KAGGLE_USERNAME and KAGGLE_KEY are correct in Streamlit secrets")
-            elif "404" in error_msg or "not found" in error_msg.lower():
-                st.sidebar.warning(f"💡 Verify dataset name is correct: {KAGGLE_DATASET}")
-            elif "User-Agent" in error_msg or "NoneType" in error_msg:
-                st.sidebar.warning("💡 Kaggle API configuration issue. Check that credentials are set correctly.")
+            # Only show errors if verbose mode is enabled, or if it's a critical error
+            if VERBOSE_LOADING:
+                st.sidebar.error(f"❌ Failed to download Kaggle dataset")
+                st.sidebar.error(f"Error details: {error_msg}")
+                # Provide helpful troubleshooting info
+                if "401" in error_msg or "Unauthorized" in error_msg:
+                    st.sidebar.warning("💡 Check that KAGGLE_USERNAME and KAGGLE_KEY are correct in Streamlit secrets")
+                elif "404" in error_msg or "not found" in error_msg.lower():
+                    st.sidebar.warning(f"💡 Verify dataset name is correct: {KAGGLE_DATASET}")
+                elif "User-Agent" in error_msg or "NoneType" in error_msg:
+                    st.sidebar.warning("💡 Kaggle API configuration issue. Check that credentials are set correctly.")
+        # Always return None to allow fallback to other data sources
         return None
 
 
