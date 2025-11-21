@@ -7,6 +7,8 @@ import pandas as pd
 import numpy as np
 import os
 import glob
+import subprocess
+import shutil
 from pathlib import Path
 from typing import Optional
 
@@ -24,6 +26,60 @@ except ImportError:
         def __getattr__(self, name):
             return lambda *args, **kwargs: None
     st = MockStreamlit()
+
+KAGGLE_DATASET = os.getenv("KAGGLE_DATASET")
+KAGGLE_DOWNLOAD_DIR = Path(os.getenv("KAGGLE_DOWNLOAD_DIR", "/tmp/kaggle_data")).resolve()
+KAGGLE_DONOR_FILE_HINTS = ["donors.csv", "donors_with_network_features.csv", "donors_full.csv"]
+
+
+def _download_kaggle_dataset_if_needed() -> Optional[Path]:
+    """
+    Download the Kaggle dataset (if configured) into a local directory so the dashboard
+    can load the full 500K rows on Streamlit Cloud.
+
+    Returns:
+        Optional[Path]: Directory containing the extracted CSV/Parquet files, or None.
+    """
+    if not KAGGLE_DATASET:
+        return None
+
+    try:
+        KAGGLE_DOWNLOAD_DIR.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.warning(f"Failed to create Kaggle data directory: {exc}")
+        return None
+
+    # If files already exist, reuse them.
+    existing_files = list(KAGGLE_DOWNLOAD_DIR.glob("*"))
+    if existing_files:
+        return KAGGLE_DOWNLOAD_DIR
+
+    kaggle_cli = shutil.which("kaggle")
+    if kaggle_cli is None:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.error("Kaggle CLI is not installed. Add 'kaggle' to requirements.txt.")
+        return None
+
+    cmd = [
+        kaggle_cli,
+        "datasets",
+        "download",
+        "-d",
+        KAGGLE_DATASET,
+        "-p",
+        str(KAGGLE_DOWNLOAD_DIR),
+        "--unzip",
+    ]
+
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        return KAGGLE_DOWNLOAD_DIR
+    except subprocess.CalledProcessError as err:
+        msg = err.stderr.decode("utf-8", errors="ignore") if err.stderr else str(err)
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.error(f"Failed to download Kaggle dataset: {msg}")
+        return None
 
 
 def load_full_dataset(use_cache: bool = True):
@@ -52,11 +108,17 @@ def _load_full_dataset_internal():
     data_dir_env = os.getenv("LMU_DATA_DIR")
     env_dir = Path(data_dir_env).resolve() if data_dir_env else None
     
+    kaggle_dir = _download_kaggle_dataset_if_needed()
+
     # Get paths from config
     data_paths = settings.get_data_paths()
     parquet_paths = data_paths['parquet_paths']
     sqlite_paths = data_paths['sqlite_paths']
     csv_dir_candidates = data_paths['csv_dir_candidates']
+
+    if kaggle_dir:
+        parquet_paths.insert(0, str(kaggle_dir / "donors_with_network_features.parquet"))
+        csv_dir_candidates.insert(0, str(kaggle_dir))
     
     # Priority 1: Try Parquet file (fastest - use pyarrow engine)
     for path in parquet_paths:
@@ -87,13 +149,26 @@ def _load_full_dataset_internal():
         try:
             csv_files = [f for f in os.listdir(csv_dir) if f.endswith('.csv')]
             if csv_files:
-                dfs = []
-                # Only load first 5 files for speed
-                for csv_file in csv_files[:5]:
-                    df_part = pd.read_csv(os.path.join(csv_dir, csv_file))
-                    dfs.append(df_part)
-                df = pd.concat(dfs, ignore_index=True)
-                return process_dataframe(df)
+                csv_dir_path = Path(csv_dir).resolve()
+                if kaggle_dir and csv_dir_path == kaggle_dir:
+                    donor_file = None
+                    for hint in KAGGLE_DONOR_FILE_HINTS:
+                        candidate = csv_dir_path / hint
+                        if candidate.exists():
+                            donor_file = candidate
+                            break
+                    if not donor_file:
+                        # fallback to first file if hint not found
+                        donor_file = csv_dir_path / csv_files[0]
+                    df = pd.read_csv(donor_file)
+                    return process_dataframe(df)
+                else:
+                    dfs = []
+                    for csv_file in csv_files[:5]:
+                        df_part = pd.read_csv(os.path.join(csv_dir, csv_file))
+                        dfs.append(df_part)
+                    df = pd.concat(dfs, ignore_index=True)
+                    return process_dataframe(df)
         except Exception as e:
             if STREAMLIT_AVAILABLE:
                 st.sidebar.warning(f"Failed to load CSV parts: {e}")
