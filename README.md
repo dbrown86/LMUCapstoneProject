@@ -46,9 +46,9 @@ LMUCapstoneProject/
 
 The full multimodal training flow (data generation → feature engineering → fusion model → evaluation → dashboard deployment) is captured in `dashboard/architecture_diagram.html`. Open that file in a browser to view the interactive layered diagram referenced throughout the documentation.
 
-## 🖥️ Streamlit Dashboard (placeholder)
+## 🖥️ Streamlit Dashboard 
 
-> _Coming soon_: add deployment notes, screenshots, and/or a public link to the Streamlit Experience Hub. The dashboard already lives in `dashboard/app.py` and can be launched with `streamlit run dashboard/app.py`.
+To access the Streamlit dashboard: https://fictitiousuniversity.streamlit.app/ 
 
 ## 🚀 Quick Start
 
