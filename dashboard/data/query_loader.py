@@ -413,6 +413,78 @@ class QueryBasedLoader:
         
         return df
     
+    def get_aggregate_value(self,
+                           column: Optional[str] = None,
+                           aggregation: str = 'COUNT',
+                           where: Optional[str] = None) -> float:
+        """
+        Get a single aggregated value (COUNT, SUM, AVG, MIN, MAX).
+        
+        Args:
+            column: Column name to aggregate (None for COUNT)
+            aggregation: Aggregation function (COUNT, SUM, AVG, MIN, MAX)
+            where: WHERE clause (optional)
+            
+        Returns:
+            Aggregated value as float
+        """
+        conn = self._get_connection()
+        try:
+            if aggregation.upper() == 'COUNT':
+                query = 'SELECT COUNT(*) as value FROM donors'
+            else:
+                if not column:
+                    raise ValueError(f"Column required for {aggregation} aggregation")
+                # Map standardized column name to database column name
+                db_col = None
+                db_columns = self._get_db_columns()
+                for db_name, std_name in self.column_mapping.items():
+                    if std_name == column and db_name in db_columns:
+                        db_col = db_name
+                        break
+                if not db_col:
+                    db_col = column if column in db_columns else None
+                
+                if not db_col:
+                    return 0.0
+                
+                query = f'SELECT {aggregation.upper()}("{db_col}") as value FROM donors'
+            
+            if where:
+                mapped_where = self._map_where_clause(where)
+                query += f" WHERE {mapped_where}"
+            
+            cursor = conn.execute(query)
+            result = cursor.fetchone()
+            return float(result[0]) if result and result[0] is not None else 0.0
+        finally:
+            conn.close()
+    
+    def get_filtered_dataframe(self,
+                              where: Optional[str] = None,
+                              columns: Optional[List[str]] = None) -> pd.DataFrame:
+        """
+        Get filtered DataFrame (for operations that need actual DataFrame).
+        Use this when you need to do pandas operations on the result.
+        
+        Args:
+            where: WHERE clause
+            columns: Columns to select (None = all)
+            
+        Returns:
+            Filtered DataFrame
+        """
+        return self.query(where=where, columns=columns)
+    
+    def _get_db_columns(self) -> List[str]:
+        """Get actual database column names (not standardized)."""
+        conn = self._get_connection()
+        try:
+            cursor = conn.execute("SELECT * FROM donors LIMIT 0")
+            return [description[0] for description in cursor.description]
+        finally:
+            conn.close()
+    
     def to_dataframe(self, limit: Optional[int] = None) -> pd.DataFrame:
         """
         Convert to full DataFrame (use with caution - may cause OOM).
