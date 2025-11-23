@@ -1,12 +1,6 @@
 """
 Data loading module for the dashboard.
 Extracted from alternate_dashboard.py for modular architecture.
-
-MEMORY OPTIMIZATIONS:
-- Kaggle downloads are DISABLED by default to prevent memory issues on Streamlit Cloud
-- Set ENABLE_KAGGLE_DOWNLOAD=true in Streamlit secrets to enable Kaggle downloads
-- Data loading uses optimized dtypes and column selection to reduce memory by 60-80%
-- All data loading is cached with Streamlit's @st.cache_data to prevent reloading
 """
 
 import pandas as pd
@@ -35,7 +29,7 @@ except ImportError:
     st = MockStreamlit()
 
 # Helper function to get secrets from either Streamlit secrets or environment variables
-def _get_secret(key: str, default: Optional[str] = None) -> Optional[str]:
+def _get_secret(key: str, default: str = None) -> Optional[str]:
     """Get a secret from Streamlit secrets (preferred) or environment variables (fallback)."""
     if STREAMLIT_AVAILABLE:
         try:
@@ -72,19 +66,10 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     """
     Download the Kaggle dataset (if configured) into a local directory so the dashboard
     can load the full 500K rows on Streamlit Cloud.
-    
-    MEMORY OPTIMIZATION: Disabled by default to prevent memory issues on Streamlit Cloud.
-    Set ENABLE_KAGGLE_DOWNLOAD=true in environment or Streamlit secrets to enable.
 
     Returns:
         Optional[Path]: Directory containing the extracted CSV/Parquet files, or None.
     """
-    # MEMORY FIX: Check if Kaggle downloads are explicitly enabled
-    enable_kaggle = _get_secret("ENABLE_KAGGLE_DOWNLOAD", "false")
-    if enable_kaggle.lower() not in ("true", "1", "yes", "on"):
-        # Skip Kaggle download by default to save memory
-        return None
-    
     # Get secrets at function call time (when st.secrets is definitely available)
     kaggle_dataset = _get_secret("KAGGLE_DATASET")
     if not kaggle_dataset:
@@ -241,46 +226,25 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
         return None
 
 
-def load_full_dataset(use_cache: bool = True, max_rows: Optional[int] = None):
+def load_full_dataset(use_cache: bool = True):
     """
     Load the complete 500K donor dataset with optimized memory usage.
     Uses column selection and dtype optimization to reduce memory by 60-80%.
     
     Args:
         use_cache: If True and Streamlit is available, use Streamlit caching
-        max_rows: Optional limit on number of rows to load (for memory-constrained environments).
-                  If None, loads full dataset. Can also be set via MAX_ROWS environment variable.
     
     Returns:
         pd.DataFrame: Processed donor dataset (optimized for memory)
     """
-    # Check for MAX_ROWS environment variable if not explicitly provided
-    if max_rows is None:
-        max_rows_env = os.getenv("MAX_ROWS")
-        if max_rows_env:
-            try:
-                max_rows = int(max_rows_env)
-            except (ValueError, TypeError):
-                max_rows = None
-    
     # Use Streamlit caching if available and requested
     if use_cache and STREAMLIT_AVAILABLE:
         @st.cache_data(show_spinner=False, ttl=7200, max_entries=1)  # 2 hour cache, no spinner, single entry
         def _load_cached():
-            df = _load_full_dataset_internal()
-            # Apply row limit if specified
-            if max_rows is not None and max_rows > 0 and len(df) > max_rows:
-                if STREAMLIT_AVAILABLE:
-                    st.sidebar.info(f"📊 Loading {max_rows:,} rows (limited from {len(df):,} total rows for memory optimization)")
-                return df.head(max_rows)
-            return df
+            return _load_full_dataset_internal()
         return _load_cached()
     else:
-        df = _load_full_dataset_internal()
-        # Apply row limit if specified
-        if max_rows is not None and max_rows > 0 and len(df) > max_rows:
-            return df.head(max_rows)
-        return df
+        return _load_full_dataset_internal()
 
 
 def _resolve_kaggle_csv_dir() -> Optional[Path]:
@@ -710,15 +674,11 @@ def _load_full_dataset_internal():
     data_dir_env = os.getenv("LMU_DATA_DIR")
     env_dir = Path(data_dir_env).resolve() if data_dir_env else None
     
-    # MEMORY OPTIMIZATION: Skip Kaggle download by default to prevent memory issues
-    # Only attempt if explicitly enabled via ENABLE_KAGGLE_DOWNLOAD=true
+    # Try Kaggle download (non-blocking - if it fails, continue with other sources)
+    # Wrap in try/except to ensure it never crashes the app
     kaggle_dir = None
     try:
-        # Check if Kaggle downloads are enabled before attempting
-        enable_kaggle = _get_secret("ENABLE_KAGGLE_DOWNLOAD", "false")
-        if enable_kaggle.lower() in ("true", "1", "yes", "on"):
-            kaggle_dir = _download_kaggle_dataset_if_needed()
-        # Otherwise skip silently to save memory
+        kaggle_dir = _download_kaggle_dataset_if_needed()
     except Exception:
         # Silently continue - Kaggle download is optional
         # Don't try to access exception attributes to avoid any decode/string errors
