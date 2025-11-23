@@ -599,6 +599,139 @@ def _convert_kaggle_csv_to_parquet(csv_dir: Path) -> Optional[Path]:
         return None
 
 
+def _load_parquet_memory_efficient(parquet_path: Path, batch_size: int = 50000) -> Optional[pd.DataFrame]:
+    """
+    Load Parquet file in memory-efficient chunks using PyArrow.
+    This prevents OOM issues when loading large datasets (500K+ rows).
+    
+    Args:
+        parquet_path: Path to Parquet file
+        batch_size: Number of rows to process at a time (default: 50K)
+        
+    Returns:
+        DataFrame with essential columns only, or None if loading fails
+    """
+    try:
+        import pyarrow.parquet as pq
+        
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+            st.sidebar.info(f"📦 Loading Parquet in chunks: {parquet_path.name}")
+        
+        # Open parquet file
+        parquet_file = pq.ParquetFile(parquet_path)
+        
+        # Get essential columns
+        essential_cols = _get_essential_columns()
+        
+        # Read schema to identify available columns
+        schema = parquet_file.schema_arrow
+        available_columns = [col.name for col in schema]
+        
+        # Select only essential columns that exist in the file
+        selected_cols = [col for col in essential_cols if col in available_columns]
+        
+        # Also include feature columns (for features page)
+        feature_cols = [col for col in available_columns if any(
+            pattern in col.lower() for pattern in ['_count', '_sum', '_mean', '_max', '_min', 'network', 'degree']
+        )]
+        selected_cols = list(set(selected_cols + feature_cols))
+        
+        if not selected_cols:
+            # If no essential columns found, use all columns (fallback)
+            selected_cols = available_columns
+            if STREAMLIT_AVAILABLE:
+                st.sidebar.warning(f"No essential columns found, loading all {len(selected_cols)} columns")
+        else:
+            if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                st.sidebar.info(f"   Loading {len(selected_cols)} columns (out of {len(available_columns)} total)")
+        
+        # Read in batches and combine efficiently
+        # Use incremental concatenation to reduce peak memory usage
+        chunks = []
+        total_rows = 0
+        num_batches = parquet_file.num_row_groups
+        
+        # Get max chunks to keep in memory at once (process in batches)
+        max_chunks_in_memory = int(os.getenv("STREAMLIT_MAX_PARQUET_CHUNKS", "10"))
+        
+        for i in range(num_batches):
+            try:
+                # Read a single row group (batch)
+                batch = parquet_file.read_row_group(i, columns=selected_cols)
+                chunk_df = batch.to_pandas()
+                
+                # Optimize data types for this chunk
+                chunk_df = _optimize_dtypes(chunk_df)
+                
+                chunks.append(chunk_df)
+                total_rows += len(chunk_df)
+                
+                # Periodically combine chunks to free memory
+                if len(chunks) >= max_chunks_in_memory:
+                    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                        st.sidebar.info(f"   Combining {len(chunks)} chunks ({total_rows:,} rows so far)...")
+                    combined = pd.concat(chunks, ignore_index=True)
+                    chunks = [combined]  # Keep only the combined chunk
+                
+                if STREAMLIT_AVAILABLE and VERBOSE_LOADING and total_rows % 100000 == 0:
+                    st.sidebar.info(f"   Loaded {total_rows:,} rows...")
+                    
+            except Exception as e:
+                if STREAMLIT_AVAILABLE:
+                    st.sidebar.warning(f"   Error reading batch {i}: {e}")
+                continue
+        
+        if not chunks:
+            if STREAMLIT_AVAILABLE:
+                st.sidebar.error("No data chunks loaded from Parquet file")
+            return None
+        
+        # Final combination of all chunks
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+            st.sidebar.info(f"   Final combination of {len(chunks)} chunk(s)...")
+        
+        df = pd.concat(chunks, ignore_index=True)
+        
+        # Final optimization pass
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+            st.sidebar.info("   Final data type optimization...")
+        df = _optimize_dtypes(df)
+        
+        memory_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
+        
+        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+            st.sidebar.success(f"✅ Loaded {len(df):,} rows, {len(df.columns)} cols (~{memory_mb:.0f}MB)")
+        
+        return df
+        
+    except ImportError:
+        # Fallback to pandas if PyArrow is not available
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.warning("PyArrow not available, using pandas (may use more memory)")
+        try:
+            # Try to load with column selection
+            essential_cols = _get_essential_columns()
+            df = pd.read_parquet(parquet_path, engine='pyarrow')
+            # Select only essential columns
+            available_cols = [col for col in essential_cols if col in df.columns]
+            feature_cols = [col for col in df.columns if any(
+                pattern in col.lower() for pattern in ['_count', '_sum', '_mean', '_max', '_min', 'network', 'degree']
+            )]
+            selected_cols = list(set(available_cols + feature_cols))
+            if selected_cols:
+                df = df[selected_cols]
+            df = _optimize_dtypes(df)
+            return df
+        except Exception as e:
+            if STREAMLIT_AVAILABLE:
+                st.sidebar.warning(f"Failed to load Parquet: {e}")
+            return None
+    except Exception as e:
+        if STREAMLIT_AVAILABLE:
+            st.sidebar.warning(f"Failed to load Parquet in chunks: {e}")
+        return None
+
+
 def _load_csv_with_essential_columns(csv_path: Path, chunk_size: int = 50000) -> Optional[pd.DataFrame]:
     """
     Load CSV file with only essential columns in chunks to avoid OOM.
@@ -714,13 +847,15 @@ def _load_full_dataset_internal():
             pass  # Continue with other sources
     
     # Priority 1: Try optimized Parquet file (essential columns, optimized dtypes, full 500K rows)
+    # Use memory-efficient chunked loading to prevent OOM issues
     for path in parquet_paths:
         if os.path.exists(path):
             try:
-                if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-                    st.sidebar.info(f"📦 Loading optimized Parquet: {Path(path).name}")
-                df = pd.read_parquet(path, engine='pyarrow')
-                return process_dataframe(df)
+                parquet_path = Path(path)
+                # Use memory-efficient chunked loading
+                df = _load_parquet_memory_efficient(parquet_path)
+                if df is not None:
+                    return process_dataframe(df)
             except Exception as e:
                 if STREAMLIT_AVAILABLE:
                     st.sidebar.warning(f"⚠️ Failed to load {path}: {e}")
@@ -762,6 +897,7 @@ def _load_full_dataset_internal():
                 st.sidebar.warning(f"⚠️ Failed to load CSV from {csv_dir}: {e}")
     
     # Priority 3: Glob search for Parquet across project and env dir
+    # Use memory-efficient chunked loading for all parquet files
     parquet_patterns = []
     if env_dir:
         parquet_patterns.append(str(env_dir / "**/*.parquet"))
@@ -773,17 +909,11 @@ def _load_full_dataset_internal():
         try:
             for p in glob.glob(pattern, recursive=True):
                 try:
-                    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-                        st.sidebar.info(f"📦 Trying Parquet: {Path(p).name}")
-                    df = pd.read_parquet(p, engine='pyarrow')
-                    # Select only essential columns if dataset is large
-                    if len(df) > 100000:
-                        essential_cols = _get_essential_columns()
-                        available_cols = [col for col in essential_cols if col in df.columns]
-                        if available_cols:
-                            df = df[available_cols]
-                            df = _optimize_dtypes(df)
-                    return process_dataframe(df)
+                    parquet_path = Path(p)
+                    # Use memory-efficient chunked loading
+                    df = _load_parquet_memory_efficient(parquet_path)
+                    if df is not None:
+                        return process_dataframe(df)
                 except Exception as e:
                     if STREAMLIT_AVAILABLE:
                         st.sidebar.info(f"⚠️ Skipped {Path(p).name}: {e}")
