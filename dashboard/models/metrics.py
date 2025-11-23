@@ -94,7 +94,21 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
     for path in parquet_paths:
         if os.path.exists(path):
             try:
-                source_df = pd.read_parquet(path, engine='pyarrow')
+                # Only load columns needed for metrics calculation to save memory
+                columns_needed = [
+                    'Will_Give_Again_Probability', 'predicted_prob', 'Legacy_Intent_Probability',
+                    'Gave_Again_In_2025', 'Gave_Again_In_2024', 'actual_gave',
+                    'days_since_last', 'Last_Gift_Date', 'last_gift_date'
+                ]
+                # Try to read with column selection (more memory efficient)
+                try:
+                    source_df = pd.read_parquet(path, engine='pyarrow', columns=columns_needed)
+                except (ValueError, KeyError):
+                    # If column selection fails, read all and select later
+                    source_df = pd.read_parquet(path, engine='pyarrow')
+                    available_cols = [col for col in columns_needed if col in source_df.columns]
+                    if available_cols:
+                        source_df = source_df[available_cols]
                 break
             except Exception:
                 continue
