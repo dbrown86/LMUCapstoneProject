@@ -108,17 +108,29 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     kaggle_creds_file = kaggle_creds_dir / "kaggle.json"
     
     # Write credentials if not already present or if they've changed
+    # Only include username and key - do NOT include User-Agent to avoid None value issues
     creds = {"username": kaggle_username, "key": kaggle_key}
     needs_update = True
     if kaggle_creds_file.exists():
         try:
             existing_creds = json.loads(kaggle_creds_file.read_text())
-            if existing_creds == creds:
+            # Remove User-Agent if it exists and is None or problematic
+            if "User-Agent" in existing_creds:
+                user_agent = existing_creds.get("User-Agent")
+                if user_agent is None or not isinstance(user_agent, str):
+                    existing_creds.pop("User-Agent", None)
+                    needs_update = True  # Force update to remove problematic User-Agent
+            # Only compare username and key, ignore User-Agent if present
+            if (existing_creds.get("username") == creds["username"] and 
+                existing_creds.get("key") == creds["key"] and
+                "User-Agent" not in existing_creds):
                 needs_update = False
         except (json.JSONDecodeError, IOError):
             pass  # File exists but is invalid, will overwrite
     
     if needs_update:
+        # Ensure we only write username and key, no User-Agent
+        # This prevents User-Agent: None issues
         kaggle_creds_file.write_text(json.dumps(creds))
         try:
             kaggle_creds_file.chmod(0o600)  # Restrict permissions (Unix only)
@@ -145,18 +157,19 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
                 pass  # Even sidebar messages can fail
         try:
             # Create clean environment dict for subprocess
-            # CRITICAL: Don't use os.environ directly - build from scratch to avoid KAGGLE_USER_AGENT issues
-            # Check Streamlit secrets first, then build env dict
+            # CRITICAL: Filter out problematic environment variables and None values
             env = {}
             
-            # Copy environment variables, but exclude KAGGLE_USER_AGENT completely
+            # Copy environment variables, but exclude KAGGLE_USER_AGENT and filter None values
+            excluded_keys = {"KAGGLE_USER_AGENT"}
             for key, value in os.environ.items():
-                if key != "KAGGLE_USER_AGENT":
-                    # Only include valid string values
-                    if value is not None and isinstance(value, str):
+                if key not in excluded_keys:
+                    # Only include valid string values (not None, not empty after strip)
+                    if value is not None and isinstance(value, str) and value.strip():
                         env[key] = value
             
             # Ensure KAGGLE_USER_AGENT is NOT in the env dict (double-check)
+            # Let Kaggle CLI use its own default User-Agent
             env.pop("KAGGLE_USER_AGENT", None)
             
             result = subprocess.run(cmd, check=True, capture_output=True, text=True, timeout=600, env=env)
@@ -806,17 +819,6 @@ def _load_full_dataset_internal():
     root = settings.get_project_root()
     data_dir_env = os.getenv("LMU_DATA_DIR")
     env_dir = Path(data_dir_env).resolve() if data_dir_env else None
-    
-    # Try Kaggle download (non-blocking - if it fails, continue with other sources)
-    # Wrap in try/except to ensure it never crashes the app
-    kaggle_dir = None
-    try:
-        kaggle_dir = _download_kaggle_dataset_if_needed()
-    except Exception:
-        # Silently continue - Kaggle download is optional
-        # Don't try to access exception attributes to avoid any decode/string errors
-        # Just continue to try other data sources
-        pass
 
     # Get paths from config
     data_paths = settings.get_data_paths()
@@ -824,29 +826,8 @@ def _load_full_dataset_internal():
     sqlite_paths = data_paths['sqlite_paths']
     csv_dir_candidates = data_paths['csv_dir_candidates']
 
-    # If Kaggle dataset was downloaded, try to create optimized Parquet
-    if kaggle_dir:
-        try:
-            resolved_csv_dir = _resolve_kaggle_csv_dir()
-            if resolved_csv_dir:
-                # Check for existing optimized Parquet first
-                if KAGGLE_CACHED_PARQUET.exists():
-                    parquet_paths.insert(0, str(KAGGLE_CACHED_PARQUET))
-                else:
-                    # Try to create optimized Parquet (non-blocking)
-                    try:
-                        cached_parquet = _convert_kaggle_csv_to_optimized_parquet(resolved_csv_dir)
-                        if cached_parquet:
-                            parquet_paths.insert(0, str(cached_parquet))
-                    except Exception as e:
-                        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-                            st.sidebar.info(f"⚠️ Parquet conversion skipped: {e}. Trying direct CSV load...")
-                        # Add CSV directory as fallback
-                        csv_dir_candidates.insert(0, str(resolved_csv_dir))
-        except Exception:
-            pass  # Continue with other sources
-    
-    # Priority 1: Try optimized Parquet file (essential columns, optimized dtypes, full 500K rows)
+    # PRIORITY 1: Try local Parquet files FIRST (memory-efficient, prevents OOM)
+    # This is the preferred method - fast, memory-efficient, and already optimized
     # Use memory-efficient chunked loading to prevent OOM issues
     for path in parquet_paths:
         if os.path.exists(path):
@@ -860,7 +841,53 @@ def _load_full_dataset_internal():
                 if STREAMLIT_AVAILABLE:
                     st.sidebar.warning(f"⚠️ Failed to load {path}: {e}")
     
-    # Priority 2: Try loading CSV with essential columns only (fault-tolerant, works with any CSV)
+    # PRIORITY 2: Try Kaggle download ONLY if no local parquet files found
+    # This is a fallback - local parquet files are preferred for performance and memory efficiency
+    kaggle_dir = None
+    try:
+        kaggle_dir = _download_kaggle_dataset_if_needed()
+    except Exception:
+        # Silently continue - Kaggle download is optional
+        pass
+
+    # If Kaggle dataset was downloaded, try to create optimized Parquet
+    if kaggle_dir:
+        try:
+            resolved_csv_dir = _resolve_kaggle_csv_dir()
+            if resolved_csv_dir:
+                # Check for existing optimized Parquet first
+                if KAGGLE_CACHED_PARQUET.exists():
+                    # Try loading the Kaggle cached parquet
+                    try:
+                        parquet_path = Path(KAGGLE_CACHED_PARQUET)
+                        df = _load_parquet_memory_efficient(parquet_path)
+                        if df is not None:
+                            return process_dataframe(df)
+                    except Exception as e:
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.warning(f"⚠️ Failed to load Kaggle cached parquet: {e}")
+                else:
+                    # Try to create optimized Parquet (non-blocking)
+                    try:
+                        cached_parquet = _convert_kaggle_csv_to_optimized_parquet(resolved_csv_dir)
+                        if cached_parquet:
+                            try:
+                                parquet_path = Path(cached_parquet)
+                                df = _load_parquet_memory_efficient(parquet_path)
+                                if df is not None:
+                                    return process_dataframe(df)
+                            except Exception as e:
+                                if STREAMLIT_AVAILABLE:
+                                    st.sidebar.warning(f"⚠️ Failed to load converted parquet: {e}")
+                    except Exception as e:
+                        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                            st.sidebar.info(f"⚠️ Parquet conversion skipped: {e}. Trying direct CSV load...")
+                        # Add CSV directory as fallback
+                        csv_dir_candidates.insert(0, str(resolved_csv_dir))
+        except Exception:
+            pass  # Continue with other sources
+    
+    # PRIORITY 3: Try loading CSV with essential columns only (fault-tolerant, works with any CSV)
     csv_dir = next((p for p in csv_dir_candidates if os.path.exists(p)), None)
     if csv_dir and os.path.exists(csv_dir):
         try:
@@ -896,7 +923,7 @@ def _load_full_dataset_internal():
             if STREAMLIT_AVAILABLE:
                 st.sidebar.warning(f"⚠️ Failed to load CSV from {csv_dir}: {e}")
     
-    # Priority 3: Glob search for Parquet across project and env dir
+    # PRIORITY 4: Glob search for Parquet across project and env dir
     # Use memory-efficient chunked loading for all parquet files
     parquet_patterns = []
     if env_dir:
@@ -921,7 +948,7 @@ def _load_full_dataset_internal():
         except Exception:
             pass
     
-    # Priority 4: Glob search for CSV files and load with essential columns
+    # PRIORITY 5: Glob search for CSV files and load with essential columns
     csv_patterns = []
     if env_dir:
         csv_patterns.append(str(env_dir / "**/donors*.csv"))
@@ -947,7 +974,7 @@ def _load_full_dataset_internal():
         except Exception:
             pass
     
-    # Priority 5: Glob search for SQLite DBs and load donors table if present
+    # PRIORITY 6: Glob search for SQLite DBs and load donors table if present
     db_patterns = []
     if env_dir:
         db_patterns.append(str(env_dir / "**/*.db"))
