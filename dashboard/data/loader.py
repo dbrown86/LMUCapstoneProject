@@ -873,86 +873,59 @@ def _load_full_dataset_internal():
     sqlite_paths = data_paths['sqlite_paths']
     csv_dir_candidates = data_paths['csv_dir_candidates']
 
-    # PRIORITY 1: Try local Parquet files FIRST (memory-efficient, prevents OOM)
-    # This is the preferred method - fast, memory-efficient, and already optimized
-    # Use memory-efficient chunked loading to prevent OOM issues
-    parquet_files_found = False
+    # PRIORITY 1: Try local Parquet files FIRST - SIMPLE AND DIRECT
+    # Check each path, load if exists, return immediately on success
+    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+        st.sidebar.info(f"🔍 Checking {len(parquet_paths)} parquet file locations...")
+    
     for path in parquet_paths:
-        if os.path.exists(path):
-            parquet_files_found = True
+        path_obj = Path(path)
+        if path_obj.exists() and path_obj.is_file():
             try:
-                parquet_path = Path(path)
-                # Use memory-efficient chunked loading
-                df = _load_parquet_memory_efficient(parquet_path)
-                if df is not None:
+                if STREAMLIT_AVAILABLE:
+                    st.sidebar.info(f"📦 Loading parquet: {path_obj.name}")
+                
+                # Simple direct load with column selection for memory efficiency
+                # Get essential columns first
+                essential_cols = _get_essential_columns()
+                
+                # Try to read with column selection (more memory efficient)
+                try:
+                    # Read parquet file
+                    df = pd.read_parquet(path, engine='pyarrow')
+                    
+                    # Select only essential columns if dataset is large
+                    if len(df) > 100000:
+                        available_cols = [col for col in essential_cols if col in df.columns]
+                        feature_cols = [col for col in df.columns if any(
+                            pattern in col.lower() for pattern in ['_count', '_sum', '_mean', '_max', '_min', 'network', 'degree']
+                        )]
+                        selected_cols = list(set(available_cols + feature_cols))
+                        if selected_cols:
+                            df = df[selected_cols]
+                    
+                    # Optimize data types
+                    df = _optimize_dtypes(df)
+                    
+                    if STREAMLIT_AVAILABLE:
+                        memory_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
+                        st.sidebar.success(f"✅ Loaded {len(df):,} rows, {len(df.columns)} cols (~{memory_mb:.0f}MB)")
+                    
                     return process_dataframe(df)
+                except Exception as e:
+                    if STREAMLIT_AVAILABLE:
+                        st.sidebar.warning(f"⚠️ Error loading {path_obj.name}: {e}")
+                    continue
             except Exception as e:
                 if STREAMLIT_AVAILABLE:
-                    st.sidebar.warning(f"⚠️ Failed to load {path}: {e}")
+                    st.sidebar.warning(f"⚠️ Failed to access {path}: {e}")
+                continue
     
-    # PRIORITY 2: Try Kaggle download ONLY if no local parquet files found
-    # This is a fallback - local parquet files are preferred for performance and memory efficiency
-    # COMPLETELY SKIP Kaggle download if parquet files exist to avoid unnecessary errors
-    kaggle_dir = None
-    kaggle_dataset = _get_secret("KAGGLE_DATASET")
+    # If we get here, no parquet files were found
+    if STREAMLIT_AVAILABLE:
+        st.sidebar.warning("⚠️ No parquet files found in configured paths. Trying other sources...")
     
-    # Only attempt Kaggle download if:
-    # 1. Kaggle is configured
-    # 2. No parquet files were found (parquet_files_found is False)
-    if kaggle_dataset and not parquet_files_found:
-        try:
-            kaggle_dir = _download_kaggle_dataset_if_needed()
-        except Exception as e:
-            # Silently continue - Kaggle download is optional
-            # Suppress User-Agent errors completely
-            error_str = str(e) if e else ""
-            if "User-Agent" not in error_str or "None" not in error_str:
-                # Only log non-User-Agent errors if verbose
-                if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-                    try:
-                        st.sidebar.info(f"ℹ️ Kaggle download skipped: {error_str[:100]}")
-                    except Exception:
-                        pass
-            pass
-
-    # If Kaggle dataset was downloaded, try to create optimized Parquet
-    if kaggle_dir:
-        try:
-            resolved_csv_dir = _resolve_kaggle_csv_dir()
-            if resolved_csv_dir:
-                # Check for existing optimized Parquet first
-                if KAGGLE_CACHED_PARQUET.exists():
-                    # Try loading the Kaggle cached parquet
-                    try:
-                        parquet_path = Path(KAGGLE_CACHED_PARQUET)
-                        df = _load_parquet_memory_efficient(parquet_path)
-                        if df is not None:
-                            return process_dataframe(df)
-                    except Exception as e:
-                        if STREAMLIT_AVAILABLE:
-                            st.sidebar.warning(f"⚠️ Failed to load Kaggle cached parquet: {e}")
-                else:
-                    # Try to create optimized Parquet (non-blocking)
-                    try:
-                        cached_parquet = _convert_kaggle_csv_to_optimized_parquet(resolved_csv_dir)
-                        if cached_parquet:
-                            try:
-                                parquet_path = Path(cached_parquet)
-                                df = _load_parquet_memory_efficient(parquet_path)
-                                if df is not None:
-                                    return process_dataframe(df)
-                            except Exception as e:
-                                if STREAMLIT_AVAILABLE:
-                                    st.sidebar.warning(f"⚠️ Failed to load converted parquet: {e}")
-                    except Exception as e:
-                        if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-                            st.sidebar.info(f"⚠️ Parquet conversion skipped: {e}. Trying direct CSV load...")
-                        # Add CSV directory as fallback
-                        csv_dir_candidates.insert(0, str(resolved_csv_dir))
-        except Exception:
-            pass  # Continue with other sources
-    
-    # PRIORITY 3: Try loading CSV with essential columns only (fault-tolerant, works with any CSV)
+    # PRIORITY 3: Try loading CSV with essential columns only
     csv_dir = next((p for p in csv_dir_candidates if os.path.exists(p)), None)
     if csv_dir and os.path.exists(csv_dir):
         try:
@@ -988,28 +961,32 @@ def _load_full_dataset_internal():
             if STREAMLIT_AVAILABLE:
                 st.sidebar.warning(f"⚠️ Failed to load CSV from {csv_dir}: {e}")
     
-    # PRIORITY 4: Glob search for Parquet across project and env dir
-    # Use memory-efficient chunked loading for all parquet files
-    parquet_patterns = []
-    if env_dir:
-        parquet_patterns.append(str(env_dir / "**/*.parquet"))
-    parquet_patterns.extend([
+    # PRIORITY 4: Glob search for Parquet files in common locations
+    parquet_patterns = [
         str(root / "data/**/*.parquet"),
         str(root / "**/donors*.parquet"),
-    ])
+    ]
+    if env_dir:
+        parquet_patterns.append(str(env_dir / "**/*.parquet"))
+    
     for pattern in parquet_patterns:
         try:
             for p in glob.glob(pattern, recursive=True):
-                try:
-                    parquet_path = Path(p)
-                    # Use memory-efficient chunked loading
-                    df = _load_parquet_memory_efficient(parquet_path)
-                    if df is not None:
+                path_obj = Path(p)
+                if path_obj.exists() and path_obj.is_file():
+                    try:
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.info(f"📦 Trying parquet: {path_obj.name}")
+                        df = pd.read_parquet(p, engine='pyarrow')
+                        # Optimize and return
+                        df = _optimize_dtypes(df)
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.success(f"✅ Loaded {len(df):,} rows from {path_obj.name}")
                         return process_dataframe(df)
-                except Exception as e:
-                    if STREAMLIT_AVAILABLE:
-                        st.sidebar.info(f"⚠️ Skipped {Path(p).name}: {e}")
-                    continue
+                    except Exception as e:
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.info(f"⚠️ Skipped {path_obj.name}: {e}")
+                        continue
         except Exception:
             pass
     
