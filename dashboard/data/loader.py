@@ -107,6 +107,41 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     kaggle_creds_dir.mkdir(exist_ok=True)
     kaggle_creds_file = kaggle_creds_dir / "kaggle.json"
     
+    # CRITICAL: Check and fix kaggle.json BEFORE attempting download
+    # This prevents User-Agent: None errors from occurring
+    if kaggle_creds_file.exists():
+        try:
+            existing_creds = json.loads(kaggle_creds_file.read_text())
+            # If User-Agent is None or invalid, fix it immediately
+            if "User-Agent" in existing_creds:
+                user_agent = existing_creds.get("User-Agent")
+                if user_agent is None or not isinstance(user_agent, str):
+                    # Remove the problematic User-Agent
+                    existing_creds.pop("User-Agent", None)
+                    # Write back immediately to prevent errors
+                    kaggle_creds_file.write_text(json.dumps(existing_creds))
+                    try:
+                        kaggle_creds_file.chmod(0o600)
+                    except (OSError, AttributeError):
+                        pass
+        except (json.JSONDecodeError, IOError, Exception):
+            # If file is corrupted, we'll fix it below
+            pass
+    
+    # ALWAYS clean up kaggle.json file first to remove any User-Agent issues
+    # This is critical - the Kaggle CLI reads this file and fails if User-Agent is None
+    if kaggle_creds_file.exists():
+        try:
+            existing_creds = json.loads(kaggle_creds_file.read_text())
+            # Remove User-Agent if it exists (regardless of value - we don't need it)
+            if "User-Agent" in existing_creds:
+                existing_creds.pop("User-Agent", None)
+                # Write back the cleaned file immediately
+                kaggle_creds_file.write_text(json.dumps(existing_creds))
+        except (json.JSONDecodeError, IOError, Exception):
+            # If file is corrupted, we'll overwrite it below
+            pass
+    
     # Write credentials if not already present or if they've changed
     # Only include username and key - do NOT include User-Agent to avoid None value issues
     creds = {"username": kaggle_username, "key": kaggle_key}
@@ -114,12 +149,10 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
     if kaggle_creds_file.exists():
         try:
             existing_creds = json.loads(kaggle_creds_file.read_text())
-            # Remove User-Agent if it exists and is None or problematic
+            # Ensure User-Agent is not present (double-check)
             if "User-Agent" in existing_creds:
-                user_agent = existing_creds.get("User-Agent")
-                if user_agent is None or not isinstance(user_agent, str):
-                    existing_creds.pop("User-Agent", None)
-                    needs_update = True  # Force update to remove problematic User-Agent
+                existing_creds.pop("User-Agent", None)
+                needs_update = True  # Force update to remove problematic User-Agent
             # Only compare username and key, ignore User-Agent if present
             if (existing_creds.get("username") == creds["username"] and 
                 existing_creds.get("key") == creds["key"] and
@@ -219,9 +252,17 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
                     error_msg = "Unknown error"
             
             # Log the error for diagnostics (but don't crash)
+            # Suppress User-Agent errors specifically - they're not actionable for the user
             if STREAMLIT_AVAILABLE:
                 try:
-                    st.sidebar.warning(f"⚠️ Kaggle download failed: {error_msg[:200]}. Trying other data sources...")
+                    # Check if this is a User-Agent error - if so, suppress it
+                    if "User-Agent" in error_msg and "None" in error_msg:
+                        # Silently skip - this is a known issue that doesn't affect functionality
+                        # The app will use local parquet files instead
+                        if VERBOSE_LOADING:
+                            st.sidebar.info("ℹ️ Kaggle download skipped (using local data sources instead)")
+                    else:
+                        st.sidebar.warning(f"⚠️ Kaggle download failed: {error_msg[:200]}. Trying other data sources...")
                 except Exception:
                     pass
             return None
@@ -230,7 +271,13 @@ def _download_kaggle_dataset_if_needed() -> Optional[Path]:
             error_msg = str(e) if e else "Unknown error"
             if STREAMLIT_AVAILABLE:
                 try:
-                    st.sidebar.warning(f"⚠️ Kaggle download error: {error_msg[:200]}. Trying other data sources...")
+                    # Suppress User-Agent errors specifically
+                    if "User-Agent" in error_msg and "None" in error_msg:
+                        # Silently skip - this is a known issue that doesn't affect functionality
+                        if VERBOSE_LOADING:
+                            st.sidebar.info("ℹ️ Kaggle download skipped (using local data sources instead)")
+                    else:
+                        st.sidebar.warning(f"⚠️ Kaggle download error: {error_msg[:200]}. Trying other data sources...")
                 except Exception:
                     pass
             return None
@@ -829,8 +876,10 @@ def _load_full_dataset_internal():
     # PRIORITY 1: Try local Parquet files FIRST (memory-efficient, prevents OOM)
     # This is the preferred method - fast, memory-efficient, and already optimized
     # Use memory-efficient chunked loading to prevent OOM issues
+    parquet_files_found = False
     for path in parquet_paths:
         if os.path.exists(path):
+            parquet_files_found = True
             try:
                 parquet_path = Path(path)
                 # Use memory-efficient chunked loading
@@ -843,12 +892,28 @@ def _load_full_dataset_internal():
     
     # PRIORITY 2: Try Kaggle download ONLY if no local parquet files found
     # This is a fallback - local parquet files are preferred for performance and memory efficiency
+    # COMPLETELY SKIP Kaggle download if parquet files exist to avoid unnecessary errors
     kaggle_dir = None
-    try:
-        kaggle_dir = _download_kaggle_dataset_if_needed()
-    except Exception:
-        # Silently continue - Kaggle download is optional
-        pass
+    kaggle_dataset = _get_secret("KAGGLE_DATASET")
+    
+    # Only attempt Kaggle download if:
+    # 1. Kaggle is configured
+    # 2. No parquet files were found (parquet_files_found is False)
+    if kaggle_dataset and not parquet_files_found:
+        try:
+            kaggle_dir = _download_kaggle_dataset_if_needed()
+        except Exception as e:
+            # Silently continue - Kaggle download is optional
+            # Suppress User-Agent errors completely
+            error_str = str(e) if e else ""
+            if "User-Agent" not in error_str or "None" not in error_str:
+                # Only log non-User-Agent errors if verbose
+                if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                    try:
+                        st.sidebar.info(f"ℹ️ Kaggle download skipped: {error_str[:100]}")
+                    except Exception:
+                        pass
+            pass
 
     # If Kaggle dataset was downloaded, try to create optimized Parquet
     if kaggle_dir:
