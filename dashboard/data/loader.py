@@ -877,7 +877,7 @@ def _load_full_dataset_internal():
     # PRIORITY 1: Kaggle (primary source for Streamlit deployments)
     # ============================================================
     kaggle_dataset = _get_secret("KAGGLE_DATASET")
-    if STREAMLIT_AVAILABLE:
+    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
         if kaggle_dataset:
             st.sidebar.info(f"📥 Attempting Kaggle load first (dataset={kaggle_dataset})")
         else:
@@ -914,7 +914,7 @@ def _load_full_dataset_internal():
                         st.sidebar.info(f"   _convert_kaggle_csv_to_optimized_parquet -> {cached_parquet}")
                     if cached_parquet and cached_parquet.exists():
                         try:
-                            if STREAMLIT_AVAILABLE:
+                            if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
                                 st.sidebar.info("📦 Loading converted parquet from Kaggle CSV")
                             df = pd.read_parquet(str(cached_parquet), engine='pyarrow')
                             df = _optimize_dtypes(df)
