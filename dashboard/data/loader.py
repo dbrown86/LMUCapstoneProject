@@ -866,17 +866,75 @@ def _load_full_dataset_internal():
     root = settings.get_project_root()
     data_dir_env = os.getenv("LMU_DATA_DIR")
     env_dir = Path(data_dir_env).resolve() if data_dir_env else None
-
+    
     # Get paths from config
     data_paths = settings.get_data_paths()
     parquet_paths = data_paths['parquet_paths']
     sqlite_paths = data_paths['sqlite_paths']
     csv_dir_candidates = data_paths['csv_dir_candidates']
-
-    # PRIORITY 1: Try local Parquet files FIRST - SIMPLE AND DIRECT
-    # Check each path, load if exists, return immediately on success
+    
+    # ============================================================
+    # PRIORITY 1: Kaggle (primary source for Streamlit deployments)
+    # ============================================================
+    kaggle_dataset = _get_secret("KAGGLE_DATASET")
     if STREAMLIT_AVAILABLE:
-        st.sidebar.info(f"🔍 Checking {len(parquet_paths)} parquet file locations...")
+        if kaggle_dataset:
+            st.sidebar.info(f"📥 Attempting Kaggle load first (dataset={kaggle_dataset})")
+        else:
+            st.sidebar.info("ℹ️ KAGGLE_DATASET not configured; skipping Kaggle load.")
+    
+    if kaggle_dataset:
+        try:
+            kaggle_dir = _download_kaggle_dataset_if_needed()
+            if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                st.sidebar.info(f"   _download_kaggle_dataset_if_needed -> {kaggle_dir}")
+            
+            if kaggle_dir:
+                # 1) Try cached parquet from previous Kaggle download
+                if KAGGLE_CACHED_PARQUET.exists():
+                    try:
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.info("📦 Loading cached parquet from Kaggle download")
+                        df = pd.read_parquet(str(KAGGLE_CACHED_PARQUET), engine='pyarrow')
+                        df = _optimize_dtypes(df)
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.success(f"✅ Loaded {len(df):,} rows from cached Kaggle parquet")
+                        return process_dataframe(df)
+                    except Exception as e:
+                        if STREAMLIT_AVAILABLE:
+                            st.sidebar.warning(f"⚠️ Error loading cached Kaggle parquet: {e}")
+                
+                # 2) Try to convert Kaggle CSV -> optimized parquet, then load it
+                resolved_csv_dir = _resolve_kaggle_csv_dir()
+                if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                    st.sidebar.info(f"   _resolve_kaggle_csv_dir -> {resolved_csv_dir}")
+                if resolved_csv_dir:
+                    cached_parquet = _convert_kaggle_csv_to_optimized_parquet(resolved_csv_dir)
+                    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                        st.sidebar.info(f"   _convert_kaggle_csv_to_optimized_parquet -> {cached_parquet}")
+                    if cached_parquet and cached_parquet.exists():
+                        try:
+                            if STREAMLIT_AVAILABLE:
+                                st.sidebar.info("📦 Loading converted parquet from Kaggle CSV")
+                            df = pd.read_parquet(str(cached_parquet), engine='pyarrow')
+                            df = _optimize_dtypes(df)
+                            if STREAMLIT_AVAILABLE:
+                                st.sidebar.success(f"✅ Loaded {len(df):,} rows from Kaggle-converted parquet")
+                            return process_dataframe(df)
+                        except Exception as e:
+                            if STREAMLIT_AVAILABLE:
+                                st.sidebar.warning(f"⚠️ Error loading Kaggle-converted parquet: {e}")
+        except Exception as e:
+            # Don't crash the app; just log what happened when verbose
+            if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+                error_str = str(e) if e else ""
+                st.sidebar.warning(f"⚠️ Kaggle load failed: {error_str[:150]}")
+    
+    # ============================================================
+    # PRIORITY 2: Local parquet files (fallback / local dev)
+    # ============================================================
+    if STREAMLIT_AVAILABLE:
+        st.sidebar.info(f"🔍 Checking {len(parquet_paths)} parquet file locations (fallback)...")
     
     for path in parquet_paths:
         # Try multiple path resolution strategies
@@ -913,12 +971,9 @@ def _load_full_dataset_internal():
                     st.sidebar.info(f"   Loading: {path_obj.name}")
                 
                 # Simple direct load with column selection for memory efficiency
-                # Get essential columns first
                 essential_cols = _get_essential_columns()
                 
-                # Try to read with column selection (more memory efficient)
                 try:
-                    # Read parquet file using the resolved path
                     df = pd.read_parquet(str(path_obj), engine='pyarrow')
                     
                     # Select only essential columns if dataset is large
@@ -931,12 +986,11 @@ def _load_full_dataset_internal():
                         if selected_cols:
                             df = df[selected_cols]
                     
-                    # Optimize data types
                     df = _optimize_dtypes(df)
                     
                     if STREAMLIT_AVAILABLE:
                         memory_mb = df.memory_usage(deep=True).sum() / 1024 / 1024
-                        st.sidebar.success(f"✅ Loaded {len(df):,} rows, {len(df.columns)} cols (~{memory_mb:.0f}MB)")
+                        st.sidebar.success(f"✅ Loaded {len(df):,} rows, {len(df.columns)} cols (~{memory_mb:.0f}MB) from local parquet")
                     
                     return process_dataframe(df)
                 except Exception as e:
@@ -956,54 +1010,9 @@ def _load_full_dataset_internal():
             st.sidebar.info(f"   Project root: {root}")
         st.sidebar.info("   Trying other sources...")
     
-    # PRIORITY 2: Try Kaggle download and convert to parquet (if configured)
-    # This downloads the dataset on first run and caches it
-    kaggle_dir = None
-    kaggle_dataset = _get_secret("KAGGLE_DATASET")
-    
-    if kaggle_dataset:
-        try:
-            kaggle_dir = _download_kaggle_dataset_if_needed()
-            if kaggle_dir:
-                # Check if we already have cached parquet from Kaggle
-                if KAGGLE_CACHED_PARQUET.exists():
-                    try:
-                        if STREAMLIT_AVAILABLE:
-                            st.sidebar.info(f"📦 Loading cached parquet from Kaggle download")
-                        df = pd.read_parquet(str(KAGGLE_CACHED_PARQUET), engine='pyarrow')
-                        df = _optimize_dtypes(df)
-                        if STREAMLIT_AVAILABLE:
-                            st.sidebar.success(f"✅ Loaded {len(df):,} rows from cached parquet")
-                        return process_dataframe(df)
-                    except Exception as e:
-                        if STREAMLIT_AVAILABLE:
-                            st.sidebar.warning(f"⚠️ Error loading cached parquet: {e}")
-                
-                # Try to convert CSV to optimized parquet
-                resolved_csv_dir = _resolve_kaggle_csv_dir()
-                if resolved_csv_dir:
-                    cached_parquet = _convert_kaggle_csv_to_optimized_parquet(resolved_csv_dir)
-                    if cached_parquet and cached_parquet.exists():
-                        try:
-                            if STREAMLIT_AVAILABLE:
-                                st.sidebar.info(f"📦 Loading converted parquet from Kaggle")
-                            df = pd.read_parquet(str(cached_parquet), engine='pyarrow')
-                            df = _optimize_dtypes(df)
-                            if STREAMLIT_AVAILABLE:
-                                st.sidebar.success(f"✅ Loaded {len(df):,} rows from Kaggle dataset")
-                            return process_dataframe(df)
-                        except Exception as e:
-                            if STREAMLIT_AVAILABLE:
-                                st.sidebar.warning(f"⚠️ Error loading converted parquet: {e}")
-        except Exception as e:
-            # Silently continue - Kaggle download is optional
-            if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
-                error_str = str(e) if e else ""
-                if "User-Agent" not in error_str:
-                    st.sidebar.info(f"ℹ️ Kaggle download skipped: {error_str[:100]}")
-            pass
-    
-    # PRIORITY 3: Try loading CSV with essential columns only
+    # ============================================================
+    # PRIORITY 3: CSV with essential columns only
+    # ============================================================
     csv_dir = next((p for p in csv_dir_candidates if os.path.exists(p)), None)
     if csv_dir and os.path.exists(csv_dir):
         try:
