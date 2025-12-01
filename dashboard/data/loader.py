@@ -875,15 +875,42 @@ def _load_full_dataset_internal():
 
     # PRIORITY 1: Try local Parquet files FIRST - SIMPLE AND DIRECT
     # Check each path, load if exists, return immediately on success
-    if STREAMLIT_AVAILABLE and VERBOSE_LOADING:
+    if STREAMLIT_AVAILABLE:
         st.sidebar.info(f"🔍 Checking {len(parquet_paths)} parquet file locations...")
     
     for path in parquet_paths:
-        path_obj = Path(path)
-        if path_obj.exists() and path_obj.is_file():
+        # Try multiple path resolution strategies
+        path_candidates = []
+        
+        # 1. Try relative to project root (most common case)
+        path_candidates.append(root / path)
+        
+        # 2. Try as absolute path if it starts with root
+        if str(path).startswith(str(root)):
+            path_candidates.append(Path(path))
+        
+        # 3. Try as-is (might be absolute already)
+        path_candidates.append(Path(path))
+        
+        # 4. Try relative to current working directory
+        path_candidates.append(Path.cwd() / path)
+        
+        # Try each candidate until we find one that exists
+        path_obj = None
+        for candidate in path_candidates:
+            try:
+                candidate = candidate.resolve()  # Resolve to absolute path
+                if candidate.exists() and candidate.is_file():
+                    path_obj = candidate
+                    break
+            except Exception:
+                continue
+        
+        if path_obj and path_obj.exists() and path_obj.is_file():
             try:
                 if STREAMLIT_AVAILABLE:
-                    st.sidebar.info(f"📦 Loading parquet: {path_obj.name}")
+                    st.sidebar.info(f"📦 Found parquet file: {path_obj}")
+                    st.sidebar.info(f"   Loading: {path_obj.name}")
                 
                 # Simple direct load with column selection for memory efficiency
                 # Get essential columns first
@@ -891,8 +918,8 @@ def _load_full_dataset_internal():
                 
                 # Try to read with column selection (more memory efficient)
                 try:
-                    # Read parquet file
-                    df = pd.read_parquet(path, engine='pyarrow')
+                    # Read parquet file using the resolved path
+                    df = pd.read_parquet(str(path_obj), engine='pyarrow')
                     
                     # Select only essential columns if dataset is large
                     if len(df) > 100000:
@@ -923,7 +950,11 @@ def _load_full_dataset_internal():
     
     # If we get here, no parquet files were found
     if STREAMLIT_AVAILABLE:
-        st.sidebar.warning("⚠️ No parquet files found in configured paths. Trying other sources...")
+        st.sidebar.warning("⚠️ No parquet files found in configured paths.")
+        if VERBOSE_LOADING:
+            st.sidebar.info(f"   Checked paths (first 5): {parquet_paths[:5]}")
+            st.sidebar.info(f"   Project root: {root}")
+        st.sidebar.info("   Trying other sources...")
     
     # PRIORITY 3: Try loading CSV with essential columns only
     csv_dir = next((p for p in csv_dir_candidates if os.path.exists(p)), None)
