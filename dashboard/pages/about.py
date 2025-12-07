@@ -299,7 +299,7 @@ def render(df: pd.DataFrame = None):
             - Purpose: Combines all modality outputs
             - Architecture: Residual blocks, LayerNorm, GELU activation
             - Dimensions: 384 → 512 → 256 → 128 → 1 (final prediction)
-            - Output: Single probability score for "will give again in 2025"
+            - Output: Single probability score for "will give in 2025"
             """)
         
         st.markdown("---")
@@ -326,7 +326,7 @@ def render(df: pd.DataFrame = None):
         - Batch normalization and layer normalization
         - Feature selection (top 60 features from ~102 candidates)
         - Unified prediction head with residual blocks
-        - Target: Predicting "will give again in 2025"
+        - Target: Predicting "will give in 2025"
         """)
         
         st.markdown("---")

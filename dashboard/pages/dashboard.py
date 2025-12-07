@@ -79,7 +79,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
         st.markdown('<p class="page-title">🏠 Executive Summary</p>', unsafe_allow_html=True)
 
         # Executive Summary Card
-        # VERIFY: Ensure we're using "Will Give Again in 2025" predictions and outcomes
+        # VERIFY: Ensure we're using "Will Give in 2025" predictions and outcomes
         # Check for Will_Give_Again_Probability directly first, then fall back to predicted_prob
         prob_col_exec = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df_filtered.columns else 'predicted_prob'
         outcome_col_exec = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df_filtered.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df_filtered.columns else 'actual_gave')
@@ -330,7 +330,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
             <div class="metric-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">AUC Score</div>
                 <div class="metric-value" style="color: white;">{auc_display}</div>
-                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 9px; line-height: 1.2;">Predicting "will give again in 2025"</div>
+                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 9px; line-height: 1.2;">Predicting "will give in 2025"</div>
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 9px; line-height: 1.2;">compared to {baseline_auc_display} Baseline AUC</div>
             </div>
             """, unsafe_allow_html=True)
@@ -521,7 +521,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
 
         with col2:
             st.markdown('<div class="chart-container">', unsafe_allow_html=True)
-            st.markdown("#### 🎯 Donors Predicted to Give Again")
+            st.markdown("#### 🎯 Donors Predicted to Give in 2025")
             # Add vertical spacing to align caption with Donor Base Breakdown chart
             # Donor Base Breakdown chart height is 380px, this chart is 250px, so add ~130px spacing
             st.markdown("<div style='height: 130px;'></div>", unsafe_allow_html=True)
@@ -571,7 +571,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
                 outcome_col_ct = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df_filtered.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df_filtered.columns else ('actual_gave' if 'actual_gave' in df_filtered.columns else None))
 
                 if donor_type_col is not None and prob_col_ct is not None:
-                    # Build per-constituency metrics based on Will Give Again 2025 predictions and outcomes (if present)
+                    # Build per-constituency metrics based on Will Give in 2025 predictions and outcomes (if present)
                     df_ct = df_filtered[[donor_type_col]].copy()
                     df_ct['prob'] = pd.to_numeric(df_filtered[prob_col_ct], errors='coerce')
                     if outcome_col_ct is not None and outcome_col_ct in df_filtered.columns:
@@ -659,7 +659,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
                         legend=dict(orientation='h', yanchor='bottom', y=1.02, xanchor='center', x=0.5)
                     )
                     plotly_chart_silent(fig_ct, config={'displayModeBar': True, 'displaylogo': False})
-                    st.caption("💡 **What this means**: Shows average 'will give again in 2025' prediction by constituency type. Where shown, the hover also includes the actual gave-again rate from outcomes.")
+                    st.caption("💡 **What this means**: Shows average 'will give in 2025' prediction by constituency type. Where shown, the hover also includes the actual gave-again rate from outcomes.")
                 else:
                     st.info("Constituency type or prediction probabilities not available to render this chart.")
 
@@ -806,7 +806,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
                         hovertemplate=(
                             "<b>%{customdata[0]}</b><br>" +
                             "Quality Score: %{x:.1f}/100<br>" +
-                            "Median Will Give Again Probability: %{customdata[1]:.1%}<br>" +
+                            "Median Will Give in 2025 Probability: %{customdata[1]:.1%}<br>" +
                             "% Donors Who Gave in Last 12 Months: %{customdata[2]:.1%}<br>" +
                             "Avg Days Since Last Gift: %{customdata[3]:.0f} days<br>" +
                             "<extra></extra>"
@@ -836,7 +836,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
                         font=dict(family="Arial, sans-serif")
                     )
                     plotly_chart_silent(fig_officer, width='stretch', config={'displayModeBar': True, 'displaylogo': False})
-                    st.markdown("**💡 How to read**: Quality Score combines median Will Give Again probability (60% weight) and recent giving activity (40% weight). Scores ≥70 = High quality (green), 50-69 = Medium (orange), <50 = Low (red). Officers are ranked from highest to lowest quality.", unsafe_allow_html=True)
+                    st.markdown("**💡 How to read**: Quality Score combines median Will Give in 2025 probability (60% weight) and recent giving activity (40% weight). Scores ≥70 = High quality (green), 50-69 = Medium (orange), <50 = Low (red). Officers are ranked from highest to lowest quality.", unsafe_allow_html=True)
                 else:
                     missing = []
                     if not prob_col:
@@ -1022,7 +1022,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
                                             card_html += '<div style="font-size: 16px; font-weight: bold; color: white;">N/A</div>'
                                     elif quad_key == 'monitor':
                                         median_prob_str = f"{quad['median_prob']:.1%}" if pd.notna(quad['median_prob']) else "0.0%"
-                                        card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Median Probability to Give Again (2025)</div>'
+                                        card_html += '<div style="font-size: 11px; color: rgba(255,255,255,0.7); margin-top: 8px; margin-bottom: 3px;">Median Probability to Give in 2025</div>'
                                         card_html += f'<div style="font-size: 16px; font-weight: bold; color: white;">{median_prob_str}</div>'
                                     elif quad_key == 'longshot':
                                         median_months = quad['median_months'] if pd.notna(quad['median_months']) and quad['median_months'] > 0 else 0
@@ -1045,7 +1045,7 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
                             render_quadrant_card(row2_col1, 'monitor')  # Bottom Left
                             render_quadrant_card(row2_col2, 'longshot')  # Bottom Right
                             
-                            st.markdown(f"**💡 How to read**: Prospects segmented by probability to give again (≥70% = High) and recency (≤365 days = Recent). Focus on **🔥 HOT PROSPECTS** first - they have both high likelihood AND recent engagement. Total top-quartile unassigned: {len(valid_data):,} (lifetime giving ≥${giving_threshold:,.0f}).", unsafe_allow_html=True)
+                            st.markdown(f"**💡 How to read**: Prospects segmented by probability to give in 2025 (≥70% = High) and recency (≤365 days = Recent). Focus on **🔥 HOT PROSPECTS** first - they have both high likelihood AND recent engagement. Total top-quartile unassigned: {len(valid_data):,} (lifetime giving ≥${giving_threshold:,.0f}).", unsafe_allow_html=True)
                         else:
                             st.info("No valid data available (missing last gift date or probability information).")
                     else:
