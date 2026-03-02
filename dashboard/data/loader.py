@@ -11,7 +11,7 @@ import subprocess
 import shutil
 import json
 from pathlib import Path
-from typing import Optional, List
+from typing import Optional, List, Dict, Set
 
 # Import config for paths
 from dashboard.config import settings
@@ -60,6 +60,45 @@ KAGGLE_CACHED_SQLITE = KAGGLE_DOWNLOAD_DIR / "donors_cached.db"
 
 # Control verbose output (set STREAMLIT_VERBOSE_LOADING=true to show loading messages)
 VERBOSE_LOADING = os.getenv("STREAMLIT_VERBOSE_LOADING", "false").lower() == "true"
+
+
+# Columns needed by each Streamlit page (normalized names after process_dataframe)
+PAGE_COLUMN_REQUIREMENTS: Dict[str, Set[str]] = {
+    "dashboard": {
+        "donor_id", "predicted_prob", "Will_Give_Again_Probability", "actual_gave",
+        "Gave_Again_In_2025", "Gave_Again_In_2024", "days_since_last", "segment",
+        "donor_type", "region", "total_giving", "avg_gift", "Last_Gift",
+        "last_gift", "LastGift", "last_gift_amount", "Primary_Manager", "Last_Gift_Date"
+    },
+    "model_comparison": {
+        "predicted_prob", "Will_Give_Again_Probability", "actual_gave",
+        "Gave_Again_In_2025", "Gave_Again_In_2024", "days_since_last",
+        "Last_Gift_Date", "last_gift_date"
+    },
+    "business_impact": {
+        "predicted_prob", "Will_Give_Again_Probability", "actual_gave",
+        "Gave_Again_In_2025", "Gave_Again_In_2024", "segment", "total_giving", "avg_gift",
+        "Last_Gift", "last_gift", "LastGift", "last_gift_amount"
+    },
+    "features": {
+        "donor_id", "predicted_prob", "Will_Give_Again_Probability", "actual_gave",
+        "Gave_Again_In_2025", "Gave_Again_In_2024", "days_since_last", "total_giving",
+        "avg_gift", "gift_count", "rfm_score", "recency_score", "frequency_score",
+        "monetary_score", "years_active", "consecutive_years"
+    },
+    "performance": {
+        "predicted_prob", "Will_Give_Again_Probability", "actual_gave",
+        "Gave_Again_In_2025", "Gave_Again_In_2024", "days_since_last", "Last_Gift_Date", "last_gift_date"
+    },
+    "take_action": {
+        "donor_id", "predicted_prob", "Will_Give_Again_Probability", "segment", "total_giving",
+        "avg_gift", "First_Name", "first_name", "First Name", "Last_Name", "last_name", "Last Name",
+        "Last_Gift", "last_gift", "LastGift", "last_gift_amount",
+        "days_since_last", "Days_Since_Last_Gift", "days_since_last_gift",
+        "Last_Gift_Date", "last_gift_date"
+    },
+    "about": set(),
+}
 
 
 def _download_kaggle_dataset_if_needed() -> Optional[Path]:
@@ -328,6 +367,79 @@ def _resolve_kaggle_csv_dir() -> Optional[Path]:
     return None
 
 
+def get_required_columns_for_page(page_key: str) -> Optional[List[str]]:
+    """Return the minimal set of source columns required for a page."""
+    if page_key not in PAGE_COLUMN_REQUIREMENTS:
+        return _get_essential_columns()
+    required = set(PAGE_COLUMN_REQUIREMENTS[page_key])
+    # Keep feature-ish columns for pages that rely on numeric feature exploration.
+    if page_key == "features":
+        required.update({"network_size", "network_degree", "degree", "network"})
+    return list(required)
+
+
+def _resolve_existing_parquet_path() -> Optional[Path]:
+    """Resolve the first existing parquet candidate from configured paths."""
+    root = settings.get_project_root()
+    data_paths = settings.get_data_paths()
+    parquet_paths = data_paths['parquet_paths']
+    for path in parquet_paths:
+        path_candidates = [root / path, Path(path), Path.cwd() / path]
+        for candidate in path_candidates:
+            try:
+                candidate = candidate.resolve()
+                if candidate.exists() and candidate.is_file():
+                    return candidate
+            except Exception:
+                continue
+    return None
+
+
+def load_dataset_for_page(page_key: str, use_cache: bool = True):
+    """
+    Load only page-relevant columns and optimize dtypes immediately.
+    This avoids loading every column at app startup.
+    """
+    if use_cache and STREAMLIT_AVAILABLE:
+        @st.cache_data(show_spinner=False, ttl=7200, max_entries=8)
+        def _load_cached(page_key_cached: str):
+            return _load_dataset_for_page_internal(page_key_cached)
+        return _load_cached(page_key)
+    return _load_dataset_for_page_internal(page_key)
+
+
+def _load_dataset_for_page_internal(page_key: str):
+    parquet_path = _resolve_existing_parquet_path()
+    if parquet_path is None:
+        # Fallback to existing robust loader if we cannot resolve a direct parquet path.
+        return _load_full_dataset_internal()
+
+    requested_cols = get_required_columns_for_page(page_key)
+    try:
+        if requested_cols:
+            try:
+                import pyarrow.parquet as pq
+                parquet_schema = pq.ParquetFile(str(parquet_path)).schema_arrow
+                available = {field.name for field in parquet_schema}
+                selected = [c for c in requested_cols if c in available]
+            except Exception:
+                selected = requested_cols
+            if selected:
+                df = pd.read_parquet(str(parquet_path), engine='pyarrow', columns=selected)
+            else:
+                df = pd.read_parquet(str(parquet_path), engine='pyarrow')
+        else:
+            # About page or no data-heavy page - load minimally.
+            df = pd.read_parquet(str(parquet_path), engine='pyarrow')
+        df = _optimize_dtypes(df)
+        return process_dataframe(df)
+    except (ValueError, KeyError):
+        # If selected columns are missing, fallback to full read from this path.
+        df = pd.read_parquet(str(parquet_path), engine='pyarrow')
+        df = _optimize_dtypes(df)
+        return process_dataframe(df)
+
+
 def _get_essential_columns() -> List[str]:
     """
     Get list of essential columns used by the dashboard.
@@ -412,7 +524,12 @@ def _optimize_dtypes(df: pd.DataFrame) -> pd.DataFrame:
     
     # Convert object columns to category where appropriate (saves memory for repeated values)
     for col in df.select_dtypes(include=['object']).columns:
-        if df[col].nunique() / len(df) < 0.5:  # If less than 50% unique values
+        if len(df) == 0:
+            continue
+        unique_count = df[col].nunique(dropna=True)
+        unique_ratio = unique_count / len(df)
+        # Only categorize low-cardinality columns to avoid category overhead
+        if unique_ratio <= 0.15 or unique_count <= 100:
             try:
                 df[col] = df[col].astype('category')
             except (ValueError, TypeError):
@@ -1385,11 +1502,26 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
     else:
         df['actual_gave'] = df['actual_gave'].astype(int)
     
-    # Calculate days_since_last from date if needed
-    if 'days_since_last' in df.columns:
-        df = df.drop(columns=['days_since_last'])
-    
+    # Calculate days_since_last from date only when existing recency is missing/invalid.
     days_since_last_created = False
+    existing_days_series = None
+    if 'days_since_last' in df.columns:
+        try:
+            existing_days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
+            non_null_ratio = existing_days_series.notna().mean()
+            q95 = existing_days_series.quantile(0.95) if existing_days_series.notna().any() else np.nan
+            # Treat tiny/negative-only recency values as invalid artifacts and recompute from date.
+            looks_invalid = (
+                non_null_ratio < 0.5
+                or (pd.notna(q95) and q95 <= 30)
+                or (existing_days_series.notna().any() and existing_days_series.min() < -1)
+            )
+            if not looks_invalid:
+                df['days_since_last'] = existing_days_series.clip(lower=0)
+                days_since_last_created = True
+        except Exception:
+            pass
+
     gift_date_col = None
     for col_name in ['last_gift_date', 'Last_Gift_Date', 'LastGiftDate', 'lastGiftDate']:
         if col_name in df.columns:
@@ -1400,8 +1532,9 @@ def process_dataframe(df: pd.DataFrame) -> pd.DataFrame:
         try:
             date_series = pd.to_datetime(df[gift_date_col], errors='coerce')
             today = pd.Timestamp.now()
-            df['days_since_last'] = (today - date_series).dt.days.clip(lower=0)
-            if df['days_since_last'].notna().sum() > 0:
+            recalculated_days = (today - date_series).dt.days.clip(lower=0)
+            if recalculated_days.notna().sum() > 0:
+                df['days_since_last'] = recalculated_days
                 days_since_last_created = True
         except Exception:
             pass

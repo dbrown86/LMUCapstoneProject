@@ -55,12 +55,12 @@ def _get_unique_values_internal(df):
     }
 
 
-def render_sidebar(df) -> Tuple[str, List[str], List[str], List[str], float]:
+def render_sidebar(df=None) -> Tuple[str, List[str], List[str], List[str], float]:
     """
     Render professional sidebar with logo and filters.
     
     Args:
-        df: Dataframe for extracting filter options
+        df: Optional dataframe. If omitted, metrics are loaded from parquet.
     
     Returns:
         tuple: (page, regions, donor_types, segments, prob_threshold)
@@ -173,6 +173,7 @@ def render_sidebar(df) -> Tuple[str, List[str], List[str], List[str], float]:
     # Model Info - Calculate from actual data
     st.sidebar.markdown('<p class="filter-header">📊 Multimodal Fusion Model</p>', unsafe_allow_html=True)
     
+    # Metrics loader can read directly from parquet, so df is optional here.
     metrics = get_model_metrics(df)
     
     # Format metrics for display
