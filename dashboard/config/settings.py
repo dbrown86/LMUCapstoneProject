@@ -25,10 +25,12 @@ def get_data_paths():
     env_dir = Path(data_dir_env).resolve() if data_dir_env else None
     
     parquet_paths = [
+        str(root / "data/processed/dashboard_summaries/donors_dashboard_slim.parquet"),
         str(root / "data/processed/parquet_export/donors_with_network_features.parquet"),
         str(root / "data/parquet_export/donors_with_network_features.parquet"),
         str(root / "donors_with_network_features.parquet"),
         str(root / "data/donors.parquet"),
+        "data/processed/dashboard_summaries/donors_dashboard_slim.parquet",
         "data/processed/parquet_export/donors_with_network_features.parquet",
         "data/parquet_export/donors_with_network_features.parquet",
         "donors_with_network_features.parquet",
@@ -71,6 +73,10 @@ def get_data_paths():
         'sqlite_paths': sqlite_paths,
         'csv_dir_candidates': csv_dir_candidates,
         'giving_paths': giving_paths,
+        'summary_dir': root / "data/processed/dashboard_summaries",
+        'overview_summary_path': root / "data/processed/dashboard_summaries/overview_summary.parquet",
+        'segment_summary_path': root / "data/processed/dashboard_summaries/segment_summary.parquet",
+        'take_action_summary_path': root / "data/processed/dashboard_summaries/take_action_summary.parquet",
     }
 
 SAVED_METRICS_CANDIDATES = [

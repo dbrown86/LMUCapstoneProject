@@ -163,7 +163,7 @@ except StreamlitAPIException:
 
 from dashboard.components.styles import get_css_styles
 from dashboard.components.sidebar import render_sidebar
-from dashboard.data.loader import load_full_dataset
+from dashboard.data.loader import load_dataset_for_page
 
 # Lazy import pages - only load when needed (performance optimization)
 # This reduces initial load time by deferring heavy imports
@@ -375,12 +375,22 @@ def main() -> None:
         </script>
         """, unsafe_allow_html=True)
 
-            # Load dataset (cached inside loader) - show progress for first load
-            with st.spinner("Loading dataset..."):
-                df = load_full_dataset(use_cache=True)
+            # Render navigation first so we can lazy-load only what the selected page needs.
+            page, regions, donor_types, segments, prob_threshold = render_sidebar()
 
-            # Sidebar: navigation + filters
-            page, regions, donor_types, segments, prob_threshold = render_sidebar(df)
+            page_key_map = {
+                "🏠 Executive Summary": "dashboard",
+                "🔬 Model Comparison": "model_comparison",
+                "💰 Business Impact": "business_impact",
+                "🔬 Features": "features",
+                "📈 Performance": "performance",
+                "⚡ Take Action": "take_action",
+                "📚 About": "about",
+            }
+            page_key = page_key_map.get(page, "dashboard")
+
+            with st.spinner("Loading page data..."):
+                df = load_dataset_for_page(page_key, use_cache=True)
 
             # Route to pages with lazy loading (all within warning suppression context)
             # Only import the specific page module when needed

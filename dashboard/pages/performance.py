@@ -135,15 +135,20 @@ def render(df: pd.DataFrame):
                 fpr, tpr = np.linspace(0, 1, 2), np.linspace(0, 1, 2)
                 st.info("Insufficient class variety to compute ROC; showing placeholder line.")
             
-            # Baseline (recency-based)
+            # Baseline (recency-based) - use same 95th-percentile scaling as metrics.py
             if 'days_since_last' in df.columns:
                 days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
                 base_mask = valid_mask & days_series.notna()
                 y_true_base = y_true_series.loc[base_mask].astype(int)
                 days_valid = days_series.loc[base_mask].astype(float)
                 if len(y_true_base) >= 2 and np.unique(y_true_base).size >= 2:
-                    baseline_pred = 1 / (1 + days_valid / 365)
-                    fpr_baseline, tpr_baseline, _ = roc_curve(y_true_base, baseline_pred)
+                    max_days = np.nanpercentile(days_valid.values, 95) if len(days_valid) > 0 else np.nan
+                    if np.isfinite(max_days) and max_days > 0:
+                        baseline_pred = 1 - (np.clip(days_valid.values, 0, max_days) / max_days)
+                        fpr_baseline, tpr_baseline, _ = roc_curve(y_true_base, baseline_pred)
+                    else:
+                        fpr_baseline = np.linspace(0, 1, 2)
+                        tpr_baseline = fpr_baseline
                 else:
                     fpr_baseline = np.linspace(0, 1, 2)
                     tpr_baseline = fpr_baseline

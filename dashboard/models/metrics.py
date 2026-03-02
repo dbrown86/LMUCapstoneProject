@@ -156,6 +156,17 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
         'lift': None
     }
     
+    # Use optimal threshold (if available) so all displayed classification metrics are consistent.
+    eval_threshold = 0.5
+    if saved_metrics and saved_metrics.get('optimal_threshold') is not None:
+        try:
+            eval_threshold = float(saved_metrics.get('optimal_threshold'))
+            if not np.isfinite(eval_threshold):
+                eval_threshold = 0.5
+            eval_threshold = float(np.clip(eval_threshold, 0.0, 1.0))
+        except (TypeError, ValueError):
+            eval_threshold = 0.5
+
     # Calculate fusion model metrics directly from source data
     if prob_col and outcome_col:
         try:
@@ -182,9 +193,8 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
                     # Calculate AUC directly
                     result['auc'] = roc_auc_score(y_true_valid, y_prob_valid)
                     
-                    # Binary predictions at 0.5 threshold
-                    threshold = 0.5
-                    y_pred_binary = (y_prob_valid >= threshold).astype(int)
+                    # Binary predictions at the same threshold used in page-level confusion matrices.
+                    y_pred_binary = (y_prob_valid >= eval_threshold).astype(int)
                     
                     # Calculate other metrics
                     result['f1'] = f1_score(y_true_valid, y_pred_binary, zero_division=0)
@@ -202,21 +212,37 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
             # Don't print error to avoid cluttering logs, but ensure we return None values
             pass
     
-    # Calculate baseline AUC from days_since_last
+    # Calculate baseline AUC from recency.
+    # If days_since_last appears corrupted (e.g., tiny/negative artifact values),
+    # recompute from gift date columns before calculating baseline metrics.
     if outcome_col:
-        # Check if days_since_last exists, otherwise calculate from Last_Gift_Date
-        if 'days_since_last' not in source_df.columns:
-            # Try to calculate from Last_Gift_Date
+        recency_series = None
+        if 'days_since_last' in source_df.columns:
+            recency_series = pd.to_numeric(source_df['days_since_last'], errors='coerce')
+            try:
+                q95 = recency_series.quantile(0.95) if recency_series.notna().any() else np.nan
+                looks_invalid = (
+                    recency_series.notna().mean() < 0.5
+                    or (pd.notna(q95) and q95 <= 30)
+                    or (recency_series.notna().any() and recency_series.min() < -1)
+                )
+            except Exception:
+                looks_invalid = False
+            if looks_invalid:
+                recency_series = None
+        
+        if recency_series is None:
             date_col = None
             for col_name in ['Last_Gift_Date', 'last_gift_date', 'LastGiftDate', 'lastGiftDate']:
                 if col_name in source_df.columns:
                     date_col = col_name
                     break
-            
             if date_col:
                 date_series = pd.to_datetime(source_df[date_col], errors='coerce')
                 today = pd.Timestamp.now()
-                source_df['days_since_last'] = (today - date_series).dt.days.clip(lower=0)
+                recency_series = (today - date_series).dt.days.clip(lower=0)
+            if recency_series is not None:
+                source_df['days_since_last'] = recency_series
         
         if 'days_since_last' in source_df.columns:
             try:

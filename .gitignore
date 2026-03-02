@@ -42,3 +42,6 @@ kaggle_export/
 kaggle_export/**
 kaggle_dataset.zip
 
+# Dashboard precomputed summaries
+data/processed/dashboard_summaries/
+
