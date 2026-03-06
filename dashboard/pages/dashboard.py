@@ -212,85 +212,9 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
         # Hero metrics
         col1, col2, col3, col4 = st.columns(4)
 
-        # Get actual metrics for dashboard - these are calculated from Gave_Again_In_2025
-        # Use the full dataframe (not filtered) for metrics calculation to ensure we have all data
-        # First try to calculate from the dataframe
+        # Get model metrics - this now properly uses saved metrics when USE_SAVED_METRICS_ONLY is True
+        # The get_model_metrics function handles all fallback logic internally
         metrics = get_model_metrics(df)
-        
-        # If metrics are None, try to load saved metrics from training
-        if metrics.get('auc') is None or metrics.get('f1') is None:
-            saved_metrics = try_load_saved_metrics()
-            if saved_metrics:
-                # Use saved metrics if calculated metrics are missing
-                if metrics.get('auc') is None and saved_metrics.get('auc') is not None:
-                    metrics['auc'] = saved_metrics.get('auc')
-                if metrics.get('f1') is None and saved_metrics.get('f1') is not None:
-                    metrics['f1'] = saved_metrics.get('f1')
-                if metrics.get('baseline_auc') is None and saved_metrics.get('baseline_auc') is not None:
-                    metrics['baseline_auc'] = saved_metrics.get('baseline_auc')
-        
-        # If still None, try to calculate directly from the dataframe columns
-        if metrics.get('auc') is None or metrics.get('f1') is None:
-            try:
-                from sklearn.metrics import roc_auc_score, f1_score
-                # Check for required columns
-                prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
-                outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else 'actual_gave')
-                
-                if prob_col in df.columns and outcome_col in df.columns:
-                    y_true = pd.to_numeric(df[outcome_col], errors='coerce')
-                    y_prob = pd.to_numeric(df[prob_col], errors='coerce')
-                    valid_mask = y_true.notna() & y_prob.notna()
-                    
-                    if valid_mask.sum() > 0:
-                        y_true_valid = y_true[valid_mask].astype(int).values
-                        y_prob_valid = np.clip(y_prob[valid_mask].astype(float).values, 0, 1)
-                        
-                        unique_classes = np.unique(y_true_valid)
-                        if len(unique_classes) >= 2:
-                            # Check if predictions are inverted
-                            prob_for_pos = y_prob_valid[y_true_valid == 1].mean() if (y_true_valid == 1).sum() > 0 else 0
-                            prob_for_neg = y_prob_valid[y_true_valid == 0].mean() if (y_true_valid == 0).sum() > 0 else 0
-                            
-                            if prob_for_pos < prob_for_neg:
-                                y_prob_valid = 1 - y_prob_valid
-                            
-                            # Calculate metrics
-                            if metrics.get('auc') is None:
-                                metrics['auc'] = roc_auc_score(y_true_valid, y_prob_valid)
-                            
-                            threshold = 0.5
-                            y_pred_binary = (y_prob_valid >= threshold).astype(int)
-                            
-                            if metrics.get('f1') is None:
-                                metrics['f1'] = f1_score(y_true_valid, y_pred_binary, zero_division=0)
-            except Exception:
-                pass  # Silently fail - will show N/A
-        
-        # Calculate baseline AUC if not available
-        if metrics.get('baseline_auc') is None:
-            try:
-                from sklearn.metrics import roc_auc_score
-                outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else 'actual_gave')
-                
-                if outcome_col in df.columns and 'days_since_last' in df.columns:
-                    y_true = pd.to_numeric(df[outcome_col], errors='coerce')
-                    days_series = pd.to_numeric(df['days_since_last'], errors='coerce')
-                    base_mask = y_true.notna() & days_series.notna()
-                    
-                    if base_mask.sum() > 0:
-                        y_true_base = y_true[base_mask].astype(int).values
-                        days_valid = days_series[base_mask].astype(float).values
-                        
-                        unique_classes_base = np.unique(y_true_base)
-                        if len(unique_classes_base) >= 2:
-                            # Calculate baseline predictions: more recent = higher probability
-                            max_days = np.nanpercentile(days_valid, 95) if days_valid.size > 0 else np.nanmax(days_valid)
-                            if np.isfinite(max_days) and max_days > 0:
-                                baseline_pred = 1 - (np.clip(days_valid, 0, max_days) / max_days)
-                                metrics['baseline_auc'] = roc_auc_score(y_true_base, baseline_pred)
-            except Exception:
-                pass  # Silently fail - will use default
         
         # Use default baseline AUC if still None (50.29% = 0.5029)
         if metrics.get('baseline_auc') is None:
