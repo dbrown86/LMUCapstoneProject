@@ -34,21 +34,32 @@ def try_load_saved_metrics() -> Optional[Dict[str, Any]]:
     Returns:
         dict: Metrics dictionary if found, None otherwise
     """
+    root = settings.get_project_root()
+    
     for p in settings.SAVED_METRICS_CANDIDATES:
-        if os.path.exists(p):
+        # Try multiple path resolutions: relative, absolute from root, and as-is
+        candidates = [
+            root / p,           # Relative to project root
+            Path(p),            # As-is (might be absolute)
+            Path.cwd() / p,     # Relative to current working directory
+        ]
+        
+        for candidate in candidates:
             try:
-                with open(p, "r", encoding="utf-8") as f:
-                    m = json.load(f)
-                return {
-                    "auc": m.get("auc"),
-                    "f1": m.get("f1"),
-                    "accuracy": m.get("accuracy"),
-                    "precision": m.get("precision"),
-                    "recall": m.get("recall"),
-                    "baseline_auc": m.get("baseline_auc"),
-                    "lift": m.get("lift"),
-                    "optimal_threshold": m.get("optimal_threshold"),
-                }
+                resolved = candidate.resolve()
+                if resolved.exists() and resolved.is_file():
+                    with open(resolved, "r", encoding="utf-8") as f:
+                        m = json.load(f)
+                    return {
+                        "auc": m.get("auc"),
+                        "f1": m.get("f1"),
+                        "accuracy": m.get("accuracy"),
+                        "precision": m.get("precision"),
+                        "recall": m.get("recall"),
+                        "baseline_auc": m.get("baseline_auc"),
+                        "lift": m.get("lift"),
+                        "optimal_threshold": m.get("optimal_threshold"),
+                    }
             except Exception:
                 continue
     return None
@@ -284,25 +295,40 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
         except Exception:
             pass
     
-    # PRIORITY: If we have saved metrics and calculated metrics are missing or clearly wrong, use saved metrics
-    # A calculated AUC < 0.6 is suspicious (should be much higher for a good model)
+    # PRIORITY: Use saved metrics when USE_SAVED_METRICS_ONLY is True, or when calculated metrics are wrong
     if saved_metrics:
-        # Use saved metrics for core metrics if calculated ones are missing or suspiciously low
-        if result.get('auc') is None or (result.get('auc') is not None and result.get('auc') < 0.6):
+        use_saved_only = getattr(settings, 'USE_SAVED_METRICS_ONLY', False)
+        
+        if use_saved_only:
+            # Always prefer saved metrics for core model metrics when USE_SAVED_METRICS_ONLY is True
             if saved_metrics.get('auc') is not None:
                 result['auc'] = saved_metrics['auc']
-        if result.get('f1') is None or (result.get('f1') is not None and result.get('f1') < 0.5):
             if saved_metrics.get('f1') is not None:
                 result['f1'] = saved_metrics['f1']
-        if result.get('accuracy') is None:
             if saved_metrics.get('accuracy') is not None:
                 result['accuracy'] = saved_metrics['accuracy']
-        if result.get('precision') is None:
             if saved_metrics.get('precision') is not None:
                 result['precision'] = saved_metrics['precision']
-        if result.get('recall') is None:
             if saved_metrics.get('recall') is not None:
                 result['recall'] = saved_metrics['recall']
+        else:
+            # Fallback: Use saved metrics only if calculated ones are missing or suspiciously low
+            if result.get('auc') is None or (result.get('auc') is not None and result.get('auc') < 0.6):
+                if saved_metrics.get('auc') is not None:
+                    result['auc'] = saved_metrics['auc']
+            if result.get('f1') is None or (result.get('f1') is not None and result.get('f1') < 0.5):
+                if saved_metrics.get('f1') is not None:
+                    result['f1'] = saved_metrics['f1']
+            if result.get('accuracy') is None:
+                if saved_metrics.get('accuracy') is not None:
+                    result['accuracy'] = saved_metrics['accuracy']
+            if result.get('precision') is None:
+                if saved_metrics.get('precision') is not None:
+                    result['precision'] = saved_metrics['precision']
+            if result.get('recall') is None:
+                if saved_metrics.get('recall') is not None:
+                    result['recall'] = saved_metrics['recall']
+        
         # Only use saved baseline_auc and lift if calculated ones are None
         if result.get('baseline_auc') is None and saved_metrics.get('baseline_auc') is not None:
             result['baseline_auc'] = saved_metrics['baseline_auc']
