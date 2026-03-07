@@ -212,9 +212,9 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
         # Hero metrics
         col1, col2, col3, col4 = st.columns(4)
 
-        # Get model metrics - this now properly uses saved metrics when USE_SAVED_METRICS_ONLY is True
-        # The get_model_metrics function handles all fallback logic internally
-        metrics = get_model_metrics(df)
+        # Use get_model_metrics(None) so we use the same path as the sidebar (saved metrics only).
+        # Passing df can hit a different/cached path on EC2 and return N/A for auc/f1.
+        metrics = get_model_metrics(None)
         
         # Use default baseline AUC if still None (50.29% = 0.5029)
         if metrics.get('baseline_auc') is None:
