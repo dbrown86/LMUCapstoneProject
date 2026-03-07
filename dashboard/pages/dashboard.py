@@ -55,12 +55,6 @@ except ImportError:
         return None
 
 
-# Hardcoded fusion model metrics (from training_summary.json) so Executive Summary always displays correctly on EC2
-EXEC_HERO_AUC = 0.948859268783399   # 94.89%
-EXEC_HERO_F1 = 0.8533871223624867   # 85.34%
-EXEC_HERO_BASELINE_AUC = 0.5029     # 50.29%
-
-
 def render(df, regions: List[str], donor_types: List[str], segments: List[str], prob_threshold: float):
     """
     Render the executive dashboard page.
@@ -215,35 +209,23 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
         <div style="height: 4px; background: linear-gradient(90deg, #1e3c72 0%, #2a5298 100%); margin: 20px 0;"></div>
         """, unsafe_allow_html=True)
 
-        # Hero metrics - use hardcoded fusion model values so Executive Summary always shows correctly (e.g. on EC2)
+        # Hero metrics - hardcoded strings so Executive Summary always shows correctly (no file/cache dependency)
         col1, col2, col3, col4 = st.columns(4)
 
-        auc_display = f"{EXEC_HERO_AUC:.2%}"
-        f1_display = f"{EXEC_HERO_F1:.2%}"
-        baseline_auc_display = f"{EXEC_HERO_BASELINE_AUC:.2%}"
-        lift_ratio = 1 + (EXEC_HERO_AUC - EXEC_HERO_BASELINE_AUC) / EXEC_HERO_BASELINE_AUC
-        if lift_ratio >= 4.5:
-            improvement_display = f"{lift_ratio:.1f}x"
-        elif lift_ratio >= 4.0:
-            improvement_display = "4-5x"
-        else:
-            improvement_display = f"{lift_ratio:.1f}x"
-        improvement = (EXEC_HERO_AUC - EXEC_HERO_BASELINE_AUC) / EXEC_HERO_BASELINE_AUC * 100
-
         with col1:
-            st.markdown(f"""
+            st.markdown("""
             <div class="metric-card" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">AUC Score</div>
-                <div class="metric-value" style="color: white;">{auc_display}</div>
+                <div class="metric-value" style="color: white;">94.89%</div>
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 9px; line-height: 1.2;">Predicting "will give in 2025"</div>
-                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 9px; line-height: 1.2;">compared to {baseline_auc_display} Baseline AUC</div>
+                <div class="metric-label" style="color: white; white-space: nowrap; font-size: 9px; line-height: 1.2;">compared to 50.29% Baseline AUC</div>
             </div>
             """, unsafe_allow_html=True)
         with col2:
-            st.markdown(f"""
+            st.markdown("""
             <div class="metric-card" style="background: linear-gradient(135deg, #f093fb 0%, #f5576c 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">F1 Score</div>
-                <div class="metric-value" style="color: white;">{f1_display}</div>
+                <div class="metric-value" style="color: white;">85.34%</div>
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 11px;">Balanced precision & recall</div>
             </div>
             """, unsafe_allow_html=True)
@@ -314,10 +296,10 @@ def render(df, regions: List[str], donor_types: List[str], segments: List[str], 
             """, unsafe_allow_html=True)
 
         with col4:
-            st.markdown(f"""
+            st.markdown("""
             <div class="metric-card" style="background: linear-gradient(135deg, #43e97b 0%, #38f9d7 100%); color: white; border: none; border-left: none; height: 170px; display: flex; flex-direction: column; justify-content: space-between;">
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">Improvement</div>
-                <div class="metric-value" style="color: white;">{improvement_display}</div>
+                <div class="metric-value" style="color: white;">1.9x</div>
                 <div class="metric-label" style="color: white; white-space: nowrap; font-size: 12px;">vs Baseline</div>
             </div>
             """, unsafe_allow_html=True)
