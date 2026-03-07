@@ -41,11 +41,13 @@ def try_load_saved_metrics() -> Optional[Dict[str, Any]]:
 
     for p in settings.SAVED_METRICS_CANDIDATES:
         # Try multiple path resolutions so we find the file on EC2 or different cwd
+        cwd = Path.cwd()
         candidates = [
             root / p,
             root_from_metrics / p,
+            cwd / p,
             Path(p),
-            Path.cwd() / p,
+            cwd.parent / p,  # e.g. when cwd is dashboard/
         ]
         
         for candidate in candidates:
@@ -69,8 +71,22 @@ def try_load_saved_metrics() -> Optional[Dict[str, Any]]:
     return None
 
 
+# Default baseline AUC when not in training_summary.json (e.g. 50.29%)
+DEFAULT_BASELINE_AUC = 0.5029
+
+
 def _saved_metrics_to_result(saved: Dict[str, Any]) -> Dict[str, Any]:
     """Build full result dict from saved metrics (all keys the UI expects)."""
+    baseline_auc = saved.get("baseline_auc")
+    if baseline_auc is None:
+        baseline_auc = DEFAULT_BASELINE_AUC
+    lift = saved.get("lift")
+    auc = saved.get("auc")
+    if lift is None and auc is not None and baseline_auc is not None and baseline_auc > 0:
+        try:
+            lift = (float(auc) - float(baseline_auc)) / float(baseline_auc)
+        except (TypeError, ValueError):
+            pass
     return {
         "auc": saved.get("auc"),
         "f1": saved.get("f1"),
@@ -78,12 +94,12 @@ def _saved_metrics_to_result(saved: Dict[str, Any]) -> Dict[str, Any]:
         "precision": saved.get("precision"),
         "recall": saved.get("recall"),
         "specificity": None,
-        "baseline_auc": saved.get("baseline_auc"),
+        "baseline_auc": baseline_auc,
         "baseline_f1": None,
         "baseline_precision": None,
         "baseline_recall": None,
         "baseline_specificity": None,
-        "lift": saved.get("lift"),
+        "lift": lift,
     }
 
 

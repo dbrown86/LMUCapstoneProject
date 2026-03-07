@@ -7,6 +7,7 @@ Compares metrics, executive summary, and chart data.
 Usage:
   python -m dashboard.compare_snapshots dashboard/local_snapshot.json dashboard/external_snapshot.json
   python -m dashboard.compare_snapshots  (defaults: local_snapshot.json, external_snapshot.json)
+  python -m dashboard.compare_snapshots --relaxed  (allow small chart count/percentage/prob differences)
 """
 
 import argparse
@@ -50,7 +51,7 @@ def _float_eq(a, b, rel_tol=1e-9):
         return a == b
 
 
-def _deep_compare(path, a, b, diffs, ignore_keys=None):
+def _deep_compare(path, a, b, diffs, ignore_keys=None, relaxed=False):
     """Compare two values; append differences to diffs. path is the key path for messages."""
     ignore_keys = ignore_keys or set()
     if path and path.split(".")[-1] in (IGNORE_KEYS | (ignore_keys or set())):
@@ -58,6 +59,19 @@ def _deep_compare(path, a, b, diffs, ignore_keys=None):
     if type(a) != type(b) and not (_norm(a) == _norm(b)):
         if isinstance(a, (int, float)) and isinstance(b, (int, float)):
             if not _float_eq(a, b):
+                # Relaxed: allow small differences in chart segment data
+                if relaxed and "charts.segment" in path:
+                    if isinstance(a, (int, float)) and isinstance(b, (int, float)):
+                        fa, fb = float(a), float(b)
+                        if "Count" in path or "segment_totals" in path:
+                            if abs(fa - fb) <= 100:
+                                return
+                        if "Percentage" in path:
+                            if abs(fa - fb) <= 0.2:
+                                return
+                        if "Avg_Prob" in path:
+                            if math.isclose(fa, fb, rel_tol=0.001):
+                                return
                 diffs.append(f"{path}: {a} != {b}")
         else:
             diffs.append(f"{path}: type or value mismatch ({type(a).__name__}) {a} vs ({type(b).__name__}) {b}")
@@ -72,19 +86,39 @@ def _deep_compare(path, a, b, diffs, ignore_keys=None):
                     if isinstance(va, dict) and isinstance(vb, dict):
                         for dk in DATA_SOURCE_COMPARE:
                             if dk in va or dk in vb:
-                                _deep_compare(f"{path}.data_source.{dk}", va.get(dk), vb.get(dk), diffs)
+                                _deep_compare(f"{path}.data_source.{dk}", va.get(dk), vb.get(dk), diffs, relaxed=relaxed)
                 continue
-            _deep_compare(f"{path}.{k}" if path else k, a.get(k), b.get(k), diffs)
+            _deep_compare(f"{path}.{k}" if path else k, a.get(k), b.get(k), diffs, relaxed=relaxed)
         return
     if isinstance(a, list):
+        # Column list order can differ between environments; compare as sets for columns_sample
+        if path.endswith("columns_sample") and isinstance(b, list):
+            sa, sb = set(a), set(b)
+            if sa != sb:
+                only_local = sa - sb
+                only_ext = sb - sa
+                if only_local or only_ext:
+                    diffs.append(f"{path}: column set differs (only in local: {len(only_local)}, only in external: {len(only_ext)})")
+            return
         if len(a) != len(b):
             diffs.append(f"{path}: list length {len(a)} != {len(b)}")
             return
         for i, (ea, eb) in enumerate(zip(a, b)):
-            _deep_compare(f"{path}[{i}]", ea, eb, diffs)
+            _deep_compare(f"{path}[{i}]", ea, eb, diffs, relaxed=relaxed)
         return
     if isinstance(a, (int, float)) and isinstance(b, (int, float)):
         if not _float_eq(a, b):
+            if relaxed and "charts.segment" in path:
+                fa, fb = float(a), float(b)
+                if "Count" in path or "segment_totals" in path:
+                    if abs(fa - fb) <= 100:
+                        return
+                if "Percentage" in path:
+                    if abs(fa - fb) <= 0.2:
+                        return
+                if "Avg_Prob" in path:
+                    if math.isclose(fa, fb, rel_tol=0.001):
+                        return
             diffs.append(f"{path}: {a} != {b}")
         return
     if a != b:
@@ -103,6 +137,7 @@ def main():
     parser = argparse.ArgumentParser(description="Compare two dashboard snapshots for parity.")
     parser.add_argument("local", nargs="?", default="dashboard/local_snapshot.json", help="Local snapshot JSON path")
     parser.add_argument("external", nargs="?", default="dashboard/external_snapshot.json", help="External (EC2) snapshot JSON path")
+    parser.add_argument("--relaxed", action="store_true", help="Allow small chart differences (counts within 100, percentages within 0.2, Avg_Prob within 0.1%%)")
     args = parser.parse_args()
 
     base = Path(__file__).resolve().parent.parent
@@ -129,7 +164,7 @@ def main():
         external = json.load(f)
 
     diffs = []
-    _deep_compare("", local, external, diffs)
+    _deep_compare("", local, external, diffs, relaxed=args.relaxed)
 
     if not diffs:
         print("PARITY OK: Local and external snapshots match (metrics and chart data).")

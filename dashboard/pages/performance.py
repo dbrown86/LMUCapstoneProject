@@ -63,9 +63,22 @@ def render(df: pd.DataFrame):
     threshold = saved_meta.get('optimal_threshold', 0.5)
     metrics['optimal_threshold'] = threshold
     
-    # CRITICAL: Use 2025 columns - prioritize Gave_Again_In_2025 and Will_Give_Again_Probability
-    outcome_col = 'Gave_Again_In_2025' if 'Gave_Again_In_2025' in df.columns else ('Gave_Again_In_2024' if 'Gave_Again_In_2024' in df.columns else 'actual_gave')
-    prob_col = 'Will_Give_Again_Probability' if 'Will_Give_Again_Probability' in df.columns else 'predicted_prob'
+    # Use first (outcome, prob) column pair that exists so ROC works even if parquet has different names
+    _col_pairs = [
+        ('Gave_Again_In_2025', 'Will_Give_Again_Probability'),
+        ('Gave_Again_In_2024', 'Will_Give_Again_Probability'),
+        ('actual_gave', 'predicted_prob'),
+        ('Gave_Again_In_2025', 'predicted_prob'),
+        ('Gave_Again_In_2024', 'predicted_prob'),
+    ]
+    outcome_col = prob_col = None
+    for o, p in _col_pairs:
+        if o in df.columns and p in df.columns:
+            outcome_col, prob_col = o, p
+            break
+    if outcome_col is None:
+        outcome_col = 'Gave_Again_In_2025'
+        prob_col = 'Will_Give_Again_Probability'
     
     # Compute accuracy and precision/recall if not in saved metrics and we have data
     if metrics.get('accuracy') is None and outcome_col in df.columns and prob_col in df.columns:
