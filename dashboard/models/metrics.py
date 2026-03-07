@@ -35,13 +35,17 @@ def try_load_saved_metrics() -> Optional[Dict[str, Any]]:
         dict: Metrics dictionary if found, None otherwise
     """
     root = settings.get_project_root()
-    
+    # Also resolve from this file's package (dashboard/models) -> project root = parent.parent
+    metrics_file = Path(__file__).resolve()
+    root_from_metrics = metrics_file.parent.parent.parent
+
     for p in settings.SAVED_METRICS_CANDIDATES:
-        # Try multiple path resolutions: relative, absolute from root, and as-is
+        # Try multiple path resolutions so we find the file on EC2 or different cwd
         candidates = [
-            root / p,           # Relative to project root
-            Path(p),            # As-is (might be absolute)
-            Path.cwd() / p,     # Relative to current working directory
+            root / p,
+            root_from_metrics / p,
+            Path(p),
+            Path.cwd() / p,
         ]
         
         for candidate in candidates:
@@ -65,6 +69,24 @@ def try_load_saved_metrics() -> Optional[Dict[str, Any]]:
     return None
 
 
+def _saved_metrics_to_result(saved: Dict[str, Any]) -> Dict[str, Any]:
+    """Build full result dict from saved metrics (all keys the UI expects)."""
+    return {
+        "auc": saved.get("auc"),
+        "f1": saved.get("f1"),
+        "accuracy": saved.get("accuracy"),
+        "precision": saved.get("precision"),
+        "recall": saved.get("recall"),
+        "specificity": None,
+        "baseline_auc": saved.get("baseline_auc"),
+        "baseline_f1": None,
+        "baseline_precision": None,
+        "baseline_recall": None,
+        "baseline_specificity": None,
+        "lift": saved.get("lift"),
+    }
+
+
 def get_model_metrics(df: Optional[pd.DataFrame] = None, use_cache: bool = True) -> Dict[str, Any]:
     """
     Calculate model performance metrics directly from parquet file for accuracy.
@@ -79,6 +101,16 @@ def get_model_metrics(df: Optional[pd.DataFrame] = None, use_cache: bool = True)
     Returns:
         dict: Dictionary containing all calculated metrics
     """
+    # When using saved metrics only, load and return immediately (no cache).
+    # This avoids the cache returning a stale N/A from a previous run when the file
+    # wasn't found (e.g. wrong cwd on EC2), and ensures both sidebar and Executive
+    # Summary get the same source of truth.
+    use_saved_only = getattr(settings, "USE_SAVED_METRICS_ONLY", False)
+    if use_saved_only:
+        saved = try_load_saved_metrics()
+        if saved:
+            return _saved_metrics_to_result(saved)
+
     # Use Streamlit caching if available and requested
     if use_cache and STREAMLIT_AVAILABLE:
         @st.cache_data(ttl=3600)
@@ -95,7 +127,10 @@ def _get_model_metrics_internal(df: Optional[pd.DataFrame] = None) -> Dict[str, 
     
     # PRIORITY 1: Try to load saved metrics first (most reliable)
     saved_metrics = try_load_saved_metrics()
-    
+    use_saved_only = getattr(settings, "USE_SAVED_METRICS_ONLY", False)
+    if use_saved_only and saved_metrics:
+        return _saved_metrics_to_result(saved_metrics)
+
     # Read directly from parquet file to avoid processing issues
     root = settings.get_project_root()
     data_paths = settings.get_data_paths()
