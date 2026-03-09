@@ -48,7 +48,7 @@ The full multimodal training flow (data generation → feature engineering → f
 
 ## 🖥️ Streamlit Dashboard 
 
-To access the Streamlit dashboard: https://fictitiousuniversity.streamlit.app/ 
+To access the Streamlit dashboard: [https://fictitiousuniversity.streamlit.app/ ](http://3.147.39.51:8501)
 
 ## 🚀 Quick Start
 
